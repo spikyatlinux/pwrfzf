@@ -38,7 +38,6 @@ if [[ "${PWRFZF_HISTORY}" == "false" ]] ||
 	PWRFZF_HISTORY="/dev/null"
 fi
 
-packages_sort_by="votes"
 use_color="always"
 detailedPreview="emerge --info --color $use_color"
 installPackage="emerge --ask --color=$use_color"
