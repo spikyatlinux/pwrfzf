@@ -38,7 +38,6 @@ if [[ "${PWRFZF_HISTORY}" == "false" ]] ||
 	PWRFZF_HISTORY="/dev/null"
 fi
 
-packages_sort_by="votes"
 use_color="always"
 detailedPreview="emerge --info --color $use_color"
 installPackage="emerge --ask --color=$use_color"
@@ -66,7 +65,7 @@ if [[ -z ${NO_COLOR} ]]; then
 		pwrfzf_colortheme="${pwrfzf_colortheme},marker:#00FF00,gutter:#0F1222,pointer:#FF0000"
 		pwrfzf_colortheme="${pwrfzf_colortheme},query:#FF0000,info:italic:#98A0C5,spinner:#00FFFF,header:italic:#75A2F7"
 	fi
-	## yay colors
+	## pwrfzf colors
 	COLOR_WHEN="always"
 	## pwrfzf colors
 	pwrfzf_color[Reset]='\x1B[0m'             ## Reset Colors/Styles
@@ -113,6 +112,26 @@ if [[ -z ${NO_FX} ]]; then
 fi
 
 ###}}} COLORS/FX
+
+# Create an array to store selected packages for installation
+install_list=()
+
+# Function to add selected package to the installation list
+add_to_install_list() {
+    echo "Adding package: $1"
+    install_list+=($(echo "$1" | cut -d":" -f1))
+    echo "Current install_list: ${install_list[@]}"
+}
+
+
+# Function to install packages from the installation list
+install_selected_packages() {
+    if [[ ${#install_list[@]} -eq 0 ]]; then
+        echo "No packages selected for installation."
+    else
+        emerge --ask --update "${install_list[@]}"
+    fi
+}
 
 ###{{{ HELP MENU
 
@@ -263,10 +282,14 @@ function _fzf() {
 		export SHELL
 	fi
 
+		# bind 'ctrl-i:execute:sudo emerge -a $(echo {+} | cut -d":" -f1)' \
+		# bind 'ctrl-x:execute:sudo emerge -a $(echo {+} | cut -d":" -f1)' \
+
+
 	#TODO: Add --bind "ctrl-h:preview(echo '$(_pwrfzf_help_full)')" \
 	fzf \
-		--bind 'ctrl-i:execute:sudo emerge -a $(echo {+} | cut -d":" -f1)' \
-		--bind 'ctrl-x:execute:sudo emerge -a $(echo {+} | cut -d":" -f1)' \
+		--bind 'ctrl-i:execute:$(add_to_install_list $(echo {+} | cut -d" " -f1))' \
+		--bind 'ctrl-x:execute:$(install_selected_packages)' \
 		--bind 'ctrl-r:execute:sudo emerge -aC $(echo {1} | cut -d" " -f1)' \
 		--bind "ctrl-u:execute:sudo emaint sync -a && sudo emerge -avuDN @world" \
 		--bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
@@ -308,6 +331,8 @@ function _fzf() {
 		--ellipsis="⣿" \
 		--tiebreak=begin \
 		--sync \
+		--track \
+		--reverse \
 		--multi \
 		--delimiter ' ' \
 		--ansi \
@@ -323,8 +348,7 @@ function _fzf() {
 					--separator=$'\t' \
 					--output-separator=': ' \
 					--table \
-					--output-width=$((COLUMNS / 4)) |
-			sort -r
+					--output-width=$((COLUMNS / 4))
 		)
 
 	returnSIG=$?
