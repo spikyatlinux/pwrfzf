@@ -65,7 +65,7 @@ if [[ -z ${NO_COLOR} ]]; then
 		pwrfzf_colortheme="${pwrfzf_colortheme},marker:#00FF00,gutter:#0F1222,pointer:#FF0000"
 		pwrfzf_colortheme="${pwrfzf_colortheme},query:#FF0000,info:italic:#98A0C5,spinner:#00FFFF,header:italic:#75A2F7"
 	fi
-	## yay colors
+	## emerge colors
 	COLOR_WHEN="always"
 	## pwrfzf colors
 	pwrfzf_color[Reset]='\x1B[0m'             ## Reset Colors/Styles
