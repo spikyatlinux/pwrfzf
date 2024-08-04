@@ -141,6 +141,7 @@ OPTIONS:
   --help               Show the extended help menu of $PROG
   -k, --keybindings    List keybindings for $PROG
   -V, --version        Show version of $PROG
+  For more information, visit the repository at $REPO
 EOF
 }
 
