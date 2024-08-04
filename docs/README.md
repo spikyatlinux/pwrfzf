@@ -14,3 +14,4 @@ Problems are:
 Feel free to help.
 
 <img width="720" height="480" src="/assets/demo-screenshot.png">
+<img width="720" height="480" src="/assets/demo-screenshot2.png">
