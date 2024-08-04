@@ -8,8 +8,8 @@ This is a modified version of yayfzf to work with emerge.
 There´re some problems that need to be resolved.
 
 Problems are:
-~~ - Selected multiple pkgs, ctrl+x only want to install one pkg ~~
-~~ - Used sudo (Later will change to doas, or do a root check, I don´t know) ~~
+~~- Selected multiple pkgs, ctrl+x only want to install one pkg~~
+~~- Used sudo (Later will change to doas, or do a root check, I don´t know)~~
 
 Feel free to help.
 
