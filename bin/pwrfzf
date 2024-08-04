@@ -1,127 +1,111 @@
 #!/usr/bin/env bash
-#vim:filetype=zsh:shiftwidth=2:softtabstop=2:expandtab:foldmethod=marker:foldmarker=###{{{,###}}}
-#shellcheck disable=2016,2034,2154
+# vim:filetype=zsh:shiftwidth=2:softtabstop=2:expandtab:foldmethod=marker:foldmarker=###{{{,###}}}
+# shellcheck disable=2016,2034,2154
 
-########################################
-#[============== PWRFZF ==============]#
-########################################
-###{{{ OPTIONS/VARIABLES
+# Re-execute the script in bash if not running in bash or zsh
+if [ -z "$BASH_VERSION" ] && [ -z "$ZSH_VERSION" ]; then
+  exec bash "$0" "$@"
+fi
 
-ORIGPROG="yayfzf"
-YAYFZF_VERSION=1.0.4
-ORIGAUTHOR="ConnerWill"
-ORIGREPO="https://github.com/${ORIGAUTHOR}/${ORIGPROG}"
+# Check and set options for bash
+if [ -n "$BASH_VERSION" ]; then
+  shopt -s lastpipe
+  export SHELL=bash
+fi
 
+# Define constants and default values
 PWRFZF_VERSION=1.0
 PROG="pwrfzf"
 AUTHOR="spikyatlinux"
 REPO="https://github.com/${AUTHOR}/${PROG}"
+PWRFZF_HISTORY=${PWRFZF_HISTORY:-${XDG_CACHE_HOME:-${HOME:-~}/.cache}/${PROG}/${PROG}_history}
 
-PWRFZF_HISTORY=${PWRFZF_HISTORY:-${XDG_CACHE_HOME:-${HOME:-~}/.cache}/${PROG}/${PROG}_history} ## pwrfzf history file
-## Environment variable 'PWRFZF_HISTORY' will be used if defined.
-## Otherwise pwrfzf will use the following for the history file,
-## falling back to next entry if variable is not defined:
-##     '$PWRFZF_HISTORY'
-##     '$XDG_CACHE_HOME/pwrfzf/pwrfzf_history'
-##     '$HOME/.cache/pwrfzf/pwrfzf_history'
-##     '~/.cache/pwrfzf/pwrfzf_history'
-##
-## If 'PWRFZF_HISTORY' is defined to any of the following, history will not be saved:
-##     'false'
-##     'False'
-##     'no'
-##     'No'
-if [[ "${PWRFZF_HISTORY}" == "false" ]] ||
-	[[ "${PWRFZF_HISTORY}" == "False" ]] ||
-	[[ "${PWRFZF_HISTORY}" == "no" ]] ||
-	[[ "${PWRFZF_HISTORY}" == "No" ]]; then
-	PWRFZF_HISTORY="/dev/null"
+# Handle history file configuration
+if [[ "${PWRFZF_HISTORY}" =~ ^(false|False|no|No)$ ]]; then
+  PWRFZF_HISTORY="/dev/null"
 fi
 
-use_color="always"
-detailedPreview="emerge --info --color $use_color"
-installPackage="emerge --ask --color=$use_color"
-updatePackages="emerge -avuDN @world"
+# Function to create history directory and file if they don't exist
+function _pwrfzf_create_history() {
+  if [[ ! -d "$(dirname "${PWRFZF_HISTORY}")" ]]; then
+    mkdir -p "$(dirname "$PWRFZF_HISTORY")" 2>/dev/null
+    touch "$PWRFZF_HISTORY" 2>/dev/null
+  fi
+}
 
-###}}}
+# Declare associative arrays for colors and effects
+declare -Al pwrfzf_color pwrfzf_fx
 
-###{{{ COLORS/FX
+# Set color theme and color definitions
+function _set_colors() {
+  if [[ -z ${NO_COLOR} ]]; then
+    pwrfzf_colortheme="hl:italic:#FFFF00,hl+:bold:underline:#FF0000"
+    pwrfzf_colortheme+=",fg:#98A0C5,fg+:bold:underline:#FFFFFF"
+    pwrfzf_colortheme+=",bg:#13172A,bg+:#0F1222"
+    pwrfzf_colortheme+=",border:#75A2F7,label:bold:#75A2F7"
+    pwrfzf_colortheme+=",preview-fg:bold:#C0CAF5,preview-bg:#0F1222"
+    pwrfzf_colortheme+=",marker:#00FF00,gutter:#0F1222,pointer:#FF0000"
+    pwrfzf_colortheme+=",query:#FF0000,info:italic:#98A0C5,spinner:#00FFFF,header:italic:#75A2F7"
+    COLOR_WHEN="always"
+    pwrfzf_color=(
+      [Reset]='\x1B[0m'
+      [Bold]='\x1B[1m'
+      [Italic]='\x1B[3m'
+      [Underline]='\x1B[4m'
+      [Black]='\x1B[38;5;0m'
+      [Gray]='\x1B[38;5;245m'
+      [White]='\x1B[38;5;15m'
+      [Red]='\x1B[38;5;196m'
+      [Green]='\x1B[38;5;46m'
+      [Yellow]='\x1B[38;5;190m'
+      [Blue]='\x1B[38;5;33m'
+      [Cyan]='\x1B[38;5;87m'
+      [BG_Black]='\x1B[48;5;0m'
+      [BG_Gray]='\x1B[48;5;245m'
+      [BG_White]='\x1B[48;5;15m'
+      [BG_Red]='\x1B[48;5;196m'
+      [BG_Green]='\x1B[48;5;46m'
+      [BG_Yellow]='\x1B[48;5;190m'
+      [BG_Blue]='\x1B[48;5;33m'
+      [BG_Cyan]='\x1B[48;5;87m'
+    )
+  else
+    pwrfzf_colortheme="fg:#FFFFFF"
+    COLOR_WHEN="never"
+  fi
+}
 
-declare -Al pwrfzf_color
-declare -Al pwrfzf_fx
+# Set terminal effects if NO_FX is not set
+function _set_fx() {
+  if [[ -z ${NO_FX} ]]; then
+    pwrfzf_fx=(
+      [Save_Title]='\x1B[22;0t'
+      [Restore_Title]='\x1B[23;0t'
+    )
+  fi
+}
 
-## Check if 'NO_COLOR' environment variable is defined. if 'NO_COLOR' is defined, do not define color array
-if [[ -z ${NO_COLOR} ]]; then
-	#OLDFZFTHEME #pwrfzf_colortheme='hl:#FFFF00,hl+:#FF0000,fg:#CCCCEE,fg+:#00FFFF,bg:#010101,bg+:#090909,query:#FF0000,info:#99BBEE,spinner:#FF00FF,border:#770AFF,label:bold:#770AFF,preview-fg:#FFFFFF,preview-bg:#090909,marker:#00FF00,gutter:#101010,pointer:#FF0000,info:#020202,header:#191919'
+# Functions to print error, warning, and verbose messages
+function _pwrfzf_error() {
+  printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+}
 
-	## fzf colors
-	## Set environment variable 'pwrfzf_colortheme' to a list of fzf colors to override default theme below
-	if [[ -z "${pwrfzf_colortheme}" ]]; then
-		pwrfzf_colortheme="hl:italic:#FFFF00,hl+:bold:underline:#FF0000"
-		pwrfzf_colortheme="${pwrfzf_colortheme},fg:#98A0C5,fg+:bold:underline:#FFFFFF"
-		pwrfzf_colortheme="${pwrfzf_colortheme},bg:#13172A,bg+:#0F1222"
-		pwrfzf_colortheme="${pwrfzf_colortheme},border:#75A2F7,label:bold:#75A2F7"
-		pwrfzf_colortheme="${pwrfzf_colortheme},preview-fg:bold:#C0CAF5,preview-bg:#0F1222"
-		pwrfzf_colortheme="${pwrfzf_colortheme},marker:#00FF00,gutter:#0F1222,pointer:#FF0000"
-		pwrfzf_colortheme="${pwrfzf_colortheme},query:#FF0000,info:italic:#98A0C5,spinner:#00FFFF,header:italic:#75A2F7"
-	fi
-	## emerge colors
-	COLOR_WHEN="always"
-	## pwrfzf colors
-	pwrfzf_color[Reset]='\x1B[0m'             ## Reset Colors/Styles
-	pwrfzf_color[reset]='\x1B[0m'             #
-	pwrfzf_color[Bold]='\x1B[1m'              ## Bold style
-	pwrfzf_color[bold]='\x1B[1m'              #
-	pwrfzf_color[Italic]='\x1B[3m'            ## Italic style
-	pwrfzf_color[italic]='\x1B[3m'            #
-	pwrfzf_color[Underline]='\x1B[4m'         ## Underline style
-	pwrfzf_color[underline]='\x1B[4m'         #
-	pwrfzf_color[Black]='\x1B[38;5;0m'        ## Foreground color
-	pwrfzf_color[Gray]='\x1B[38;5;245m'       #
-	pwrfzf_color[DarkGray]='\x1B[38;5;8m'     #
-	pwrfzf_color[White]='\x1B[38;5;15m'       #
-	pwrfzf_color[Red]='\x1B[38;5;196m'        #
-	pwrfzf_color[Green]='\x1B[38;5;46m'       #
-	pwrfzf_color[Yellow]='\x1B[38;5;190m'     #
-	pwrfzf_color[Blue]='\x1B[38;5;33m'        #
-	pwrfzf_color[Purple]='\x1B[38;5;93m'      #
-	pwrfzf_color[Magenta]='\x1B[38;5;201m'    #
-	pwrfzf_color[Cyan]='\x1B[38;5;87m'        #
-	pwrfzf_color[BG_Black]='\x1B[48;5;0m'     ## Background color
-	pwrfzf_color[BG_Gray]='\x1B[48;5;245m'    #
-	pwrfzf_color[BG_DarkGray]='\x1B[48;5;8m'  #
-	pwrfzf_color[BG_White]='\x1B[48;5;15m'    #
-	pwrfzf_color[BG_Red]='\x1B[48;5;196m'     #
-	pwrfzf_color[BG_Green]='\x1B[48;5;46m'    #
-	pwrfzf_color[BG_Yellow]='\x1B[48;5;190m'  #
-	pwrfzf_color[BG_Blue]='\x1B[48;5;33m'     #
-	pwrfzf_color[BG_Purple]='\x1B[48;5;93m'   #
-	pwrfzf_color[BG_Magenta]='\x1B[48;5;201m' #
-	pwrfzf_color[BG_Cyan]='\x1B[48;5;87m'     #
-else
-	pwrfzf_colortheme="fg:#FFFFFF"
-	COLOR_WHEN="never"
-fi
+function _pwrfzf_warning() {
+  printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Yellow]}${pwrfzf_color[Black]} WARNING ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Yellow]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+}
 
-## Check if 'NO_FX' environment variable is defined. if 'NO_FX' is defined, do not define effects array
-if [[ -z ${NO_FX} ]]; then
-	pwrfzf_fx[Save_Title]='\x1B[22;0t'    ## Save title
-	pwrfzf_fx[save_title]='\x1B[22;0t'    #
-	pwrfzf_fx[Restore_Title]='\x1B[23;0t' ## Restore title
-	pwrfzf_fx[restore_title]='\x1B[23;0t' #
-fi
+function _pwrfzf_verbose() {
+  printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@"
+}
 
-###}}} COLORS/FX
-
-###{{{ HELP MENU
-
-_pwrfzf_keys() {
-	cat <<EOF
+# Display keybindings
+function _pwrfzf_keys() {
+  cat <<EOF
 KEYBINDINGS:
                      TAB : Select
                Shift-TAB : Unselect
                   Ctrl-d : Deselect all
-                  Ctrl-i : Install selected
+                  Ctrl-i : Add to install list
                   Ctrl-r : Uninstall selected
                   Ctrl-u : Update all packages
                   Ctrl-n : History next
@@ -143,16 +127,17 @@ KEYBINDINGS:
 EOF
 }
 
-_pwrfzf_help() {
-	cat >&2 <<EOF
+# Display help message
+function _pwrfzf_help() {
+  cat >&2 <<EOF
 NAME:
   $PROG
 DESCRIPTION:
-  Search, install, remove packages from the gentoo overlays interactively with fzf
+  Search, install, remove packages from the Gentoo overlays interactively with fzf
 USAGE:
   $PROG [options] [search query]
-  $PROG [-V|--version] [-k|--keybindings] [-h] [--help] [search query]
-OPTIONS
+  $PROG [-V|--version] [-k|--keybindings] [-h|--help] [search query]
+OPTIONS:
   -h                   Show the help menu
   --help               Show the extended help menu of $PROG
   -k, --keybindings    List keybindings for $PROG
@@ -160,9 +145,10 @@ OPTIONS
 EOF
 }
 
-_pwrfzf_help_full() {
-	cat >&2 <<EOF
-$(_pwrfzf_help)
+# Display extended help message
+function _pwrfzf_help_full() {
+  _pwrfzf_help
+  cat >&2 <<EOF
 EXAMPLES:
   $ $PROG        : Run $PROG with no search query
   $ $PROG fzf    : Search for 'fzf' with $PROG
@@ -171,203 +157,148 @@ $(_pwrfzf_keys)
 For more information, check out the pwrfzf README
 https://github.com/ConnerWill/pwrfzf/blob/main/docs/README.md
 EOF
-
-	return 0
 }
 
-_pwrfzf_version() {
-	echo "${PROG}: ${PWRFZF_VERSION}"
-	return 0
+# Display version
+function _pwrfzf_version() {
+  echo "${PROG}: ${PWRFZF_VERSION}"
 }
 
-###}}}
-
-###{{{ MESSEGES
-
-_pwrfzf_error() { printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[reset]}\n" "${@}" >/dev/stderr; }
-_pwrfzf_warning() { printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Yellow]}${pwrfzf_color[Black]} WARNING ${pwrfzf_color[reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Yellow]}%s${pwrfzf_color[reset]}\n" "${@}" >/dev/stderr; }
-_pwrfzf_verbose() { printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[reset]}\n" "${@}"; }
-
-###}}}
-
-###{{{ FUNCTIONS
-
-###{{{ SEARCH PACKAGES
-function _search_packagemgr() {
-	# echo -en '\e]0;pwrfzf\e\\' # set title
-	local searchQuery
-	searchQuery="${*}"
-	qsearch -sN \
-		"$searchQuery"
+# Function to find the emerge command
+function _find_emerge() {
+  if [[ -z $EMERGE ]]; then
+    if command -v emerge >/dev/null 2>&1; then
+      EMERGE="sudo emerge"
+    elif [[ $EUID -eq 0 ]]; then
+      EMERGE=emerge
+    else
+      EMERGE=emerge
+    fi
+  fi
 }
 
-## List all packages
-function _list_packagemgr() {
-	# echo -en '\e]0;pwrfzf\e\\' # set title
-	qsearch -a
+# Preview function for fzf
+function __fzf_preview() {
+  local SearchInput SearchHeader label
+  SearchInput="${*}"
+  [[ -n "${SearchInput}" ]] && SearchHeader="${SearchInput}" && label="${SearchInput}" || label="pwrfzf"
+  [[ "$(basename "$SHELL")" == "fish" ]] && SHELL="$(which bash)" && export SHELL
+
+  {
+    eix "${SearchInput}"
+    echo
+    echo "Installed files:"
+    qlist "${SearchInput}"
+  } 2>/dev/null
 }
 
-## List all installed packages
-function _list_installed_packagemgr() {
-	# echo -en '\e]0;pwrfzf\e\\' # set title
-	qlist -Iv
-}
-###}}}
-
-###{{{ MKDIR HISTORY
-function _pwrfzf_create_history() {
-	if [[ ! -d "$(dirname "${PWRFZF_HISTORY}")" ]]; then
-		mkdir -p "$(dirname "$PWRFZF_HISTORY")" 2>/dev/null
-		touch "$PWRFZF_HISTORY" 2>/dev/null
-	fi
-}
-###}}}
-
-###{{{ FZF
-
-## Main script. Run fzf with package manager search results.
-function _fzf() {
-	# tput smcup
-	# trap 'tput rmcup' SIGINT
-
-	#echo -en '\e]0;pwrfzf\e\\' # set title
-	local SearchInput SearchHeader
-	SearchInput="${*}"
-	[[ -n "${SearchInput}" ]] && SearchHeader="${SearchInput}" && label="${SearchInput}" || label="pwrfzf"
-
-	# We need bash in order the handle the stdin redirection correctly in --preview
-	if [[ "$(basename "$SHELL")" == "fish" ]]; then
-		SHELL="$(which bash)"
-		export SHELL
-	fi
-
-	#TODO: Add --bind "ctrl-h:preview(echo '$(_pwrfzf_help_full)')" \
-	fzf \
-		--bind 'ctrl-i:execute:sudo emerge -a $(echo {+} | cut -d":" -f1)' \
-		--bind 'ctrl-x:execute:sudo emerge -a $(echo {+} | cut -d":" -f1)' \
-		--bind 'ctrl-r:execute:sudo emerge -aC $(echo {1} | cut -d" " -f1)' \
-		--bind "ctrl-u:execute:sudo emaint sync -a && sudo emerge -avuDN @world" \
-		--bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
-		--bind 'ctrl-l:clear-query+clear-screen+clear-selection' \
-		--bind 'alt-bspace:clear-query' \
-		--bind 'alt-left:kill-word' \
-		--bind "esc:abort" \
-		--bind 'ctrl-c:abort' \
-		--bind 'ctrl-d:deselect-all' \
-		--bind 'ctrl-q:print-query' \
-		--bind 'ctrl-v:toggle-preview' \
-		--bind 'ctrl-n:next-history' \
-		--bind 'ctrl-p:previous-history' \
-		--bind 'right:first' \
-		--bind 'left:last' \
-		--bind 'end:first' \
-		--bind 'home:last' \
-		--bind 'pgdn:page-down' \
-		--bind 'pgup:page-up' \
-		--bind 'shift-tab:deselect' \
-		--bind 'tab:select' \
-		--bind 'ctrl-s:select' \
-		--bind "?:preview(echo '$(_pwrfzf_keys)')" \
-		--bind "change:first" \
-		--header 'Press ? for keybindings' \
-		--header-lines=1 \
-		--preview 'cat <(eix {1}) <(qlist {1} | awk "{print \$1}")' \
-		--preview-window 'bottom,43%,border-double' \
-		--history="$PWRFZF_HISTORY" \
-		--query="${SearchInput}" \
-		--preview-label-pos=top \
-		--border-label-pos=3 \
-		--border 'top' \
-		--preview-label="╣${label}╠" \
-		--border-label="┨${PROG}┠" \
-		--info=inline \
-		--scroll-off=20 \
-		--hscroll-off=30 \
-		--ellipsis="⣿" \
-		--tiebreak=begin \
-		--sync \
-		--multi \
-		--delimiter ' ' \
-		--ansi \
-		--color="${pwrfzf_colortheme}" \
-		< <(
-			qsearch \
-				-s \
-				"${SearchInput}" 2>/dev/null |
-			cut \
-					--delimiter=':' \
-					--fields=1,2- |
-			column \
-					--separator=$'\t' \
-					--output-separator=': ' \
-					--table \
-					--output-width=$((COLUMNS / 4)) |
-			sort -r
-		)
-
-	returnSIG=$?
-	echo $returnSIG
-	return $returnSIG
+# Emerge list function
+function __emerge_list() {
+  qsearch --all | sort -r | grep -E "$1"
 }
 
-###}}}
+# Main function with loop to keep running after keybind actions
+function main() {
+  local ARGS=() PICKS SearchInput
 
-###}}}
+  # Check for search query argument
+  if [[ "$#" -gt 0 ]]; then
+    SearchInput="$*"
+  else
+    SearchInput=""
+  fi
 
-###{{{ MAIN
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      -h | --help) _pwrfzf_help; exit 0 ;;
+      --help-full) _pwrfzf_help_full; exit 0 ;;
+      -k | --keybindings) _pwrfzf_keys; exit 0 ;;
+      -V | --version) _pwrfzf_version; exit 0 ;;
+      __fzf_preview) shift; __fzf_preview "$@"; exit 0 ;;
+      *) break ;;
+    esac
+    shift
+  done
 
-###{{{ MAIN CASE
+  ARGS=("$@")
+  [[ ${#ARGS[@]} -eq 0 ]] && ARGS=("-a")
 
-function _main() {
-	if [[ -n "$1" ]]; then
-		while [[ -n $1 ]]; do
-			case $1 in
-			-h*)
-				_pwrfzf_help
-				return 0
-				;;
-			--h* | help)
-				_pwrfzf_help_full
-				return 0
-				;;
-			-V | --ver*)
-				_pwrfzf_version
-				return 0
-				;;
-			-k | --key*)
-				_pwrfzf_keys
-				return 0
-				;;
-			-*)
-				_pwrfzf_error "Unknown option '${1}'"
-				_pwrfzf_help
-				return 1
-				;;
-			*)
-				_fzf "${@}"
-				return $?
-				;;
-			esac
-			shift
-		done
-	else
-		_fzf "${@}"
-		return $?
-	fi
+  while true; do
+    __emerge_list "$SearchInput" |
+      fzf \
+        --bind 'ctrl-r:execute:sudo emerge -aC $(echo {1} | cut -d":" -f1)' \
+        --bind "ctrl-w:execute:sudo emaint sync -a && sudo emerge -avuDN @world" \
+        --bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
+        --bind 'ctrl-l:clear-query+clear-screen+clear-selection' \
+        --bind 'alt-bspace:clear-query' \
+        --bind 'alt-left:kill-word' \
+        --bind "esc:abort" \
+        --bind 'ctrl-c:abort' \
+        --bind 'ctrl-d:deselect-all' \
+        --bind 'ctrl-q:print-query' \
+        --bind 'ctrl-v:toggle-preview' \
+        --bind 'ctrl-n:next-history' \
+        --bind 'ctrl-p:previous-history' \
+        --bind 'right:first' \
+        --bind 'left:last' \
+        --bind 'end:first' \
+        --bind 'home:last' \
+        --bind 'pgdn:page-down' \
+        --bind 'pgup:page-up' \
+        --bind 'shift-tab:deselect' \
+        --bind 'tab:select' \
+        --bind 'ctrl-s:select' \
+        --bind "?:preview(echo '$(_pwrfzf_keys)')" \
+        --bind "change:first" \
+        --header 'Press ? for keybindings' \
+        --header-lines=1 \
+        --preview-window 'bottom,43%,border-double' \
+        --history="$PWRFZF_HISTORY" \
+        --query="${SearchInput}" \
+        --preview-label-pos=top \
+        --border-label-pos=3 \
+        --border 'top' \
+        --preview-label="╣${label}╠" \
+        --border-label="┨${PROG}┠" \
+        --info=inline \
+        --scroll-off=20 \
+        --hscroll-off=30 \
+        --ellipsis="⣿" \
+        --tiebreak=begin \
+        --sync \
+        --multi \
+        --delimiter ' ' \
+        --ansi \
+        --color="${pwrfzf_colortheme}" \
+        --preview="'${BASH_SOURCE[0]}' __fzf_preview {1}" | readarray -t PICKS
+
+    if [[ ${#PICKS[@]} -eq 0 ]]; then
+      exit 0
+    fi
+
+    declare -a PKGS
+    for PICK in "${PICKS[@]}"; do
+      if [[ "${PICK}" =~ ^([^:]+) ]]; then
+        PKGS+=("${BASH_REMATCH[1]}")
+      fi
+    done
+
+    $EMERGE "${ARGS[@]}" "${PKGS[@]}"
+  done
 }
 
-###}}}
+# Check if the script is sourced or run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # Initialization
+  _set_colors
+  _set_fx
+  _find_emerge
+  _pwrfzf_create_history
 
-function pwrfzf() {
-	_pwrfzf_create_history
-	_main "${@}"
-}
+  # Execute main function
+  main "$@"
+fi
 
-## check if sourced or run directly
+# Check if sourced or run directly
 (return 0 2>/dev/null) && sourced=1 || sourced=0
 [[ $sourced -eq 0 ]] && pwrfzf "${@}"
-
-###}}}
-
-#TODO:
-# Use 'yay --show --complete' to list all packages in the AUR instead of searching for all
