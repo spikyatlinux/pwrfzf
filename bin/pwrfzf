@@ -106,7 +106,7 @@ KEYBINDINGS:
                   Ctrl-d : Deselect all
                   Ctrl-i : Add to install list
                   Ctrl-r : Uninstall selected
-                  Ctrl-u : Update all packages
+                  Ctrl-w : Update all world packages
                   Ctrl-n : History next
                   Ctrl-p : History previous
                   Ctrl-/ : Change layout
