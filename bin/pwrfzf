@@ -154,7 +154,7 @@ EXAMPLES:
   $ $PROG        : Show the help menu for $PROG
 $(_pwrfzf_keys)
 For more information, check out the pwrfzf README
-https://github.com/ConnerWill/pwrfzf/blob/main/docs/README.md
+https://github.com/spikyatlinux/pwrfzf/README.md
 EOF
 }
 
