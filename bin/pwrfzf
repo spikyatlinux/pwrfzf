@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # vim:filetype=zsh:shiftwidth=2:softtabstop=2:expandtab:foldmethod=marker:foldmarker=###{{{,###}}}
-# shellcheck disable=2016,2034,2154
 
 # Re-execute the script in bash if not running in bash or zsh
 if [ -z "$BASH_VERSION" ] && [ -z "$ZSH_VERSION" ]; then
