@@ -13,6 +13,4 @@ Problems are:
 
 Feel free to help.
 
-Original README.md is in docs directory.
-
 <img width="720" height="480" src="/assets/demo-screenshot.png">
