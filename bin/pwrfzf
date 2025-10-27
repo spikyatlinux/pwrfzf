@@ -414,7 +414,7 @@ function __fzf_preview() {
 function _portage_config_manager() {
     while true; do
         local config_type
-        config_type=$(echo -e "accept_keywords\nuse\nmask\nunmask\nenv\nsets" | fzf \
+        config_type=$(echo -e "make.conf\naccept_keywords\nuse\nmask\nunmask\nenv\nsets" | fzf \
             --bind 'enter:accept' \
             --bind 'esc:abort' \
             --header 'Select Portage config type (Enter=select, ESC=back)' \
@@ -437,10 +437,53 @@ function _portage_config_manager() {
 function _config_preview() {
     local config_type="$1"
     
-    if [[ "$config_type" == "sets" ]]; then
-        _sets_preview
+    case "$config_type" in
+        "make.conf")
+            _make_conf_preview
+            ;;
+        "sets")
+            _sets_preview
+            ;;
+        *)
+            _portage_config_preview "$config_type"
+            ;;
+    esac
+}
+
+function _make_conf_preview() {
+    local make_conf="/etc/portage/make.conf"
+    local make_conf_dir="/etc/portage/make.conf.d"
+    
+    echo "make.conf Configuration"
+    echo "══════════════════════════════════════"
+    
+    if [[ -f "$make_conf" ]]; then
+        echo "=== make.conf ==="
+        echo "══════════════════════════════════════"
+        cat "$make_conf" 2>/dev/null
+        echo ""
     else
-        _portage_config_preview "$config_type"
+        echo "No make.conf found at: $make_conf"
+        echo ""
+    fi
+    
+    if [[ -d "$make_conf_dir" ]]; then
+        echo "=== make.conf.d Directory ==="
+        echo "Files found:"
+        find "$make_conf_dir" -type f 2>/dev/null | head -10 | while read -r file; do
+            echo "• $file"
+        done
+        echo ""
+        
+        local first_file=$(find "$make_conf_dir" -type f 2>/dev/null | head -1)
+        if [[ -n "$first_file" ]]; then
+            echo "First file content:"
+            echo "File: $first_file"
+            echo "══════════════════════════════════════"
+            cat "$first_file" 2>/dev/null
+        fi
+    else
+        echo "No make.conf.d directory found at: $make_conf_dir"
     fi
 }
 
@@ -459,7 +502,7 @@ function _portage_config_preview() {
         echo "Single file configuration:"
         echo "File: $config_base"
         echo "══════════════════════════════════════"
-        cat "$config_base" 2>/dev/null | head -15
+        cat "$config_base" 2>/dev/null
     elif [[ -d "$config_base" ]]; then
         echo "Directory configuration:"
         echo "Path: $config_base"
@@ -473,7 +516,7 @@ function _portage_config_preview() {
             echo "First file content:"
             echo "File: $first_file"
             echo "══════════════════════════════════════"
-            cat "$first_file" 2>/dev/null | head -10
+            cat "$first_file" 2>/dev/null
         fi
     fi
     
@@ -494,7 +537,7 @@ function _portage_config_preview() {
                 echo "First env file content:"
                 echo "File: $first_env_file"
                 echo "══════════════════════════════════════"
-                cat "$first_env_file" 2>/dev/null | head -10
+                cat "$first_env_file" 2>/dev/null
             fi
         fi
     fi
@@ -510,7 +553,7 @@ function _sets_preview() {
     if [[ -f "$sets_conf" ]]; then
         echo "sets.conf:"
         echo "══════════════════════════════════════"
-        cat "$sets_conf" 2>/dev/null | head -15
+        cat "$sets_conf" 2>/dev/null
         echo ""
     fi
     
@@ -525,7 +568,7 @@ function _sets_preview() {
             echo "First set file content:"
             echo "File: $first_file"
             echo "══════════════════════════════════════"
-            cat "$first_file" 2>/dev/null | head -10
+            cat "$first_file" 2>/dev/null
         fi
     else
         echo "No package sets directory found at: $sets_dir"
@@ -535,10 +578,165 @@ function _sets_preview() {
 function _manage_config_type() {
     local config_type="$1"
     
-    if [[ "$config_type" == "sets" ]]; then
-        _manage_sets
-    else
-        _manage_portage_config "$config_type"
+    case "$config_type" in
+        "make.conf")
+            _manage_make_conf
+            ;;
+        "sets")
+            _manage_sets
+            ;;
+        *)
+            _manage_portage_config "$config_type"
+            ;;
+    esac
+}
+
+function _manage_make_conf() {
+    local make_conf="/etc/portage/make.conf"
+    local make_conf_dir="/etc/portage/make.conf.d"
+    
+    while true; do
+        local action
+        action=$(echo -e "Edit make.conf\nBrowse make.conf.d files\nAdd make.conf.d file\nBack" | fzf \
+            --bind 'esc:abort' \
+            --header "Manage make.conf Configuration" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - make.conf┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="${BASH_SOURCE[0]} _make_conf_action_preview {}")
+        
+        case "$action" in
+            "Edit make.conf")
+                _launch_editor "$make_conf"
+                ;;
+            "Browse make.conf.d files")
+                _browse_make_conf_d
+                ;;
+            "Add make.conf.d file")
+                _add_make_conf_d_file
+                ;;
+            "Back"|"")
+                break
+                ;;
+        esac
+    done
+}
+
+function _make_conf_action_preview() {
+    local action="$1"
+    
+    case "$action" in
+        "Edit make.conf")
+            echo "Edit main make.conf file"
+            echo "Global Portage settings like USE flags, CFLAGS, etc."
+            echo ""
+            echo "File: /etc/portage/make.conf"
+            echo ""
+            echo "Current content preview:"
+            cat "/etc/portage/make.conf" 2>/dev/null | head -10 || echo "No make.conf found"
+            ;;
+        "Browse make.conf.d files")
+            echo "Browse make.conf.d directory"
+            echo "Split configuration across multiple files"
+            echo ""
+            echo "Available files:"
+            find "/etc/portage/make.conf.d" -type f 2>/dev/null 2>/dev/null | head -5 | while read -r file; do
+                echo "• $(basename "$file")"
+            done || echo "No make.conf.d directory"
+            ;;
+        "Add make.conf.d file")
+            echo "Add new make.conf.d file"
+            echo "Create a new configuration file in make.conf.d"
+            echo ""
+            echo "Example file content:"
+            echo "USE=\"X wayland pulseaudio\""
+            echo "CFLAGS=\"-O2 -pipe\""
+            echo "CXXFLAGS=\"\${CFLAGS}\""
+            ;;
+    esac
+}
+
+function _browse_make_conf_d() {
+    local make_conf_dir="/etc/portage/make.conf.d"
+    
+    if [[ ! -d "$make_conf_dir" ]]; then
+        echo "No make.conf.d directory found at: $make_conf_dir"
+        echo "Create it? (y/N)"
+        read -r answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            ${PRIV_ESC} mkdir -p "$make_conf_dir"
+            echo "Created: $make_conf_dir"
+        else
+            return
+        fi
+    fi
+    
+    while true; do
+        local selected_file
+        selected_file=$(find "$make_conf_dir" -type f 2>/dev/null | fzf \
+            --bind 'enter:accept' \
+            --bind 'esc:abort' \
+            --header "Select make.conf.d file (Enter=edit, ESC=back)" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - make.conf.d┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="echo '=== {} ==='; \
+                      echo 'Size: $(du -h {} 2>/dev/null | cut -f1)'; \
+                      echo 'Lines: $(wc -l < {} 2>/dev/null || echo 0)'; \
+                      echo 'Modified: $(stat -c %y {} 2>/dev/null | cut -d. -f1)'; \
+                      echo '══════════════════════════════════════'; \
+                      cat {} 2>/dev/null")
+        
+        if [[ -z "$selected_file" ]]; then
+            break
+        fi
+        
+        _launch_editor "$selected_file"
+    done
+}
+
+function _add_make_conf_d_file() {
+    local make_conf_dir="/etc/portage/make.conf.d"
+    local filename new_file
+    
+    echo "══════════════════════════════════════"
+    echo "Add make.conf.d file"
+    echo "Enter filename:"
+    echo -n "Filename: "
+    read -r filename
+    [[ -z "$filename" ]] && return
+    
+    # Ensure it has .conf extension
+    if [[ "$filename" != *.conf ]]; then
+        filename="$filename.conf"
+    fi
+    
+    new_file="$make_conf_dir/$filename"
+    
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM CREATION:"
+    echo "File: $new_file"
+    echo ""
+    echo "Create this file? (y/N)"
+    read -r answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        ${PRIV_ESC} mkdir -p "$make_conf_dir"
+        ${PRIV_ESC} touch "$new_file"
+        _pwrfzf_success "Created make.conf.d file: $filename"
+        
+        echo ""
+        echo "Edit file now? (y/N)"
+        read -r edit_answer
+        if [[ "$edit_answer" =~ ^[Yy]$ ]]; then
+            _launch_editor "$new_file"
+        fi
     fi
 }
 
@@ -626,7 +824,7 @@ function _delete_config_files_interactive() {
             --border-label="┨${PROG} - Delete Files┠" \
             --ansi \
             --color="${pwrfzf_colortheme}" \
-            --preview="bash -c 'echo \"=== {}\" ===; echo \"Size: \$(du -h {} 2>/dev/null | cut -f1)\"; echo \"Lines: \$(wc -l < {} 2>/dev/null || echo 0)\"; echo \"Modified: \$(stat -c %y {} 2>/dev/null | cut -d. -f1)\"; echo \"══════════════════════════════════════\"; cat {} 2>/dev/null | head -20'")
+            --preview="bash -c 'echo \"=== {}\" ===; echo \"Size: \$(du -h {} 2>/dev/null | cut -f1)\"; echo \"Lines: \$(wc -l < {} 2>/dev/null || echo 0)\"; echo \"Modified: \$(stat -c %y {} 2>/dev/null | cut -d. -f1)\"; echo \"══════════════════════════════════════\"; cat {} 2>/dev/null'")
 
         if [[ -z "$selected_file" ]]; then
             break
@@ -876,7 +1074,7 @@ function _edit_config_files() {
             --border-label="┨${PROG} - File Browser┠" \
             --ansi \
             --color="${pwrfzf_colortheme}" \
-            --preview="echo '=== {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null | head -20")
+            --preview="echo '=== {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null")
         
         if [[ -z "$selected_file" ]]; then
             break
@@ -1249,7 +1447,7 @@ function _browse_package_sets() {
             --border-label="┨${PROG} - Package Sets┠" \
             --ansi \
             --color="${pwrfzf_colortheme}" \
-            --preview="echo '=== {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null | head -20")
+            --preview="echo '=== {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null")
         
         if [[ -z "$selected_file" ]]; then
             break
