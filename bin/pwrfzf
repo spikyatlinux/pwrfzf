@@ -70,7 +70,8 @@ function _pwrfzf_init() {
 # Setup logging based on configuration
 function _setup_logging() {
     if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
-        exec > >(tee -a "${PWRFZF_CONFIG_DIR}/pwrfzf.log") 2>&1
+        # Don't use exec redirection as it interferes with FZF
+        # Instead, we'll log specific actions manually
         _pwrfzf_verbose "Logging enabled: ${PWRFZF_CONFIG_DIR}/pwrfzf.log"
     fi
 }
@@ -1152,69 +1153,62 @@ function _install_packages_with_fallback() {
     local max_retries=3
     local retry_count=0
     
-    # Remove --ask from pretend commands to avoid hanging
+    # Separate pretend args (without --ask) and real args (with --ask)
     local pretend_args=()
+    local real_args=()
+    
     for arg in "${emerge_args[@]}"; do
         if [[ "$arg" != "--ask" ]]; then
             pretend_args+=("$arg")
         fi
+        real_args+=("$arg")
     done
     
     while [[ $retry_count -lt $max_retries ]]; do
-        # Try to install packages and capture output immediately
-        _pwrfzf_verbose "Attempting installation..."
-        local emerge_output
-        emerge_output=$(${EMERGE_CMD} "${emerge_args[@]}" 2>&1)
-        local emerge_exit_code=$?
+        # Show what would be merged - full output like normal emerge
+        echo "══════════════════════════════════════"
+        echo "Calculating dependencies..."
         
-        if [[ $emerge_exit_code -eq 0 ]]; then
-            _pwrfzf_success "Package installation completed successfully"
-            return 0
-        else
-            ((retry_count++))
+        # Run emerge --pretend without --ask and capture output
+        echo ">>> These are the packages that would be merged, in order:"
+        local pretend_output
+        pretend_output=$(${EMERGE_CMD} --pretend "${pretend_args[@]}" 2>&1)
+        local pretend_exit_code=$?
+        
+        # Show the pretend output regardless of exit code
+        echo "$pretend_output"
+        
+        # If pretend failed, we need to analyze the error
+        if [[ $pretend_exit_code -ne 0 ]]; then
+            echo ""
+            echo "❌ Dependency calculation encountered issues"
             
-            # IMMEDIATE ANALYSIS - use the output we already have from the failed emerge
-            local output="$emerge_output"
-            
-            # QUICK PATTERN MATCHING - no need for another emerge --pretend
+            # ANALYSIS - check for common issues in the pretend output
             local masked_packages=()
             local use_flag_packages=()
             local use_flag_suggestions=()
             local circular_deps_packages=()
             local circular_deps_suggestions=()
-            
-# In the circular dependency detection section:
-            # Check for circular dependencies in the existing output
-            if echo "$output" | grep -q "circular dependencies"; then
-                # Also look for the specific suggestion
-                local fix_line=$(echo "$output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
+
+            # Check for circular dependencies in pretend output
+            if echo "$pretend_output" | grep -q "circular dependencies"; then
+                # Single pass to extract both package and flag
+                local fix_line
+                fix_line=$(echo "$pretend_output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
+                
                 if [[ "$fix_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][a-zA-Z0-9_-]+) ]]; then
                     local pkg="${BASH_REMATCH[1]}"
                     local flag="${BASH_REMATCH[2]}"
-                    # Clean the flag for display (remove + and any trailing characters)
-                    local clean_display_flag="${flag#[+-]}"
-                    clean_display_flag="${clean_display_flag%)}"  # Remove trailing parenthesis
-                    # ALWAYS use >= format with the full versioned package
+                    local clean_display_flag="${flag#[+-]%)}"  # Remove +- prefix and ) suffix
+                    
                     circular_deps_packages=("$pkg")
                     circular_deps_suggestions=("$pkg:$flag")
-                    
-                    # Store clean version for display
                     circular_deps_display=("$pkg:$clean_display_flag")
                 fi
             fi
             
-                # Also look for the specific suggestion
-                local fix_line=$(echo "$output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
-                if [[ "$fix_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][^[:space:]]+) ]]; then
-                    local pkg="${BASH_REMATCH[1]}"
-                    local flag="${BASH_REMATCH[2]}"
-                    circular_deps_packages=("$pkg")
-                    circular_deps_suggestions=("$pkg:$flag")
-                fi
-            fi
-            
-            # Check for USE flag requirements in existing output
-            local use_line=$(echo "$output" | grep "Change USE:" | head -1)
+            # Check for USE flag requirements in pretend output
+            local use_line=$(echo "$pretend_output" | grep "Change USE:" | head -1)
             if [[ -n "$use_line" ]]; then
                 if [[ "$use_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][^[:space:]]+) ]]; then
                     local pkg="${BASH_REMATCH[1]}"
@@ -1225,14 +1219,15 @@ function _install_packages_with_fallback() {
                 fi
             fi
 
-            # Check for masked packages in existing output
-            if echo "$output" | grep -q "masked"; then
-                masked_packages=($(echo "$output" | grep -oE '!!!.*"([^"]+)".*masked' | head -3 | sed -E 's/.*"([^"]+)".*/\1/'))
+            # Check for masked packages in pretend output
+            if echo "$pretend_output" | grep -q "masked"; then
+                masked_packages=($(echo "$pretend_output" | grep -oE '!!!.*"([^"]+)".*masked' | head -3 | sed -E 's/!!!"([^"]+)".*/\1/'))
             fi
             
-            # IMMEDIATELY SHOW OPTIONS - no delay
+            # SHOW OPTIONS BASED ON ANALYSIS
             if [[ ${#circular_deps_packages[@]} -gt 0 ]] || [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
-                _pwrfzf_warning "Circular dependencies detected!"
+                echo ""
+                echo "🔄 Circular dependencies detected!"
                 if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
                     echo "Affected packages:"
                     printf "  - %s\n" "${circular_deps_packages[@]}"
@@ -1244,14 +1239,14 @@ function _install_packages_with_fallback() {
                     for suggestion in "${circular_deps_suggestions[@]}"; do
                         local pkg="${suggestion%:*}"
                         local flag="${suggestion#*:}"
-                        # Clean the flag for display
-                        local clean_display_flag="${flag#[+-]}"
-                        clean_display_flag="${clean_display_flag%)}"  # Remove trailing parenthesis
-                        echo "  - $pkg: Enable USE flag '$clean_display_flag'"
+                        # Clean the flag for display - remove + prefix and ) suffix
+                        local clean_flag="${flag#[+-]}"
+                        clean_flag="${clean_flag%)}"
+                        echo "  - $pkg: Enable USE flag '$clean_flag'"                        
                     done
                 fi
 
-                # Offer to fix circular dependencies IMMEDIATELY
+                # Offer to fix circular dependencies
                 echo "══════════════════════════════════════"
                 echo "Would you like to:"
                 if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
@@ -1270,49 +1265,60 @@ function _install_packages_with_fallback() {
                     1)
                         if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
                             _apply_suggested_use_flags "${circular_deps_suggestions[@]}"
-                            continue
+                            # RETURN TO MAIN LOOP TO RESTART COMPLETELY
+                            echo "🔄 Configuration updated. Returning to main menu to restart installation..."
+                            return 2  # Special return code to indicate config was changed
                         else
-                            _pwrfzf_warning "No specific suggestions available"
+                            echo "⚠️ No specific suggestions available"
                             if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
                                 _manage_use_flags_interactive "${circular_deps_packages[@]}"
+                                # Update both pretend and real args for consistency
+                                pretend_args=("${real_args[@]}")
+                                echo "🔄 Configuration updated. Returning to main menu to restart installation..."
+                                return 2  # Special return code to indicate config was changed
                             fi
-                            continue
                         fi
                         ;;
                     2)
                         if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
                             _manage_use_flags_interactive "${circular_deps_packages[@]}"
+                            # Update both pretend and real args for consistency
+                            pretend_args=("${real_args[@]}")
+                            echo "🔄 Configuration updated. Returning to main menu to restart installation..."
+                            return 2  # Special return code to indicate config was changed
                         fi
-                        continue
                         ;;
                     3)
-                        _pwrfzf_verbose "Allowing emerge to handle circular dependencies automatically..."
-                        emerge_args=("--autounmask-use" "${emerge_args[@]}")
+                        echo "🔧 Allowing emerge to handle circular dependencies automatically..."
+                        real_args=("--autounmask-use" "${real_args[@]}")
+                        pretend_args=("--autounmask-use" "${pretend_args[@]}")
                         continue
                         ;;
                     4)
-                        _pwrfzf_verbose "Removing packages with circular dependencies..."
+                        echo "⏭️ Removing packages with circular dependencies..."
                         for pkg in "${circular_deps_packages[@]}"; do
-                            emerge_args=(${emerge_args[@]//$pkg/})
+                            real_args=(${real_args[@]//$pkg/})
+                            pretend_args=(${pretend_args[@]//$pkg/})
                         done
                         # Remove empty arguments
-                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        real_args=($(printf '%s\n' "${real_args[@]}" | grep -v '^$'))
+                        pretend_args=($(printf '%s\n' "${pretend_args[@]}" | grep -v '^$'))
+                        echo "🔄 Retrying without problematic packages..."
+                        retry_count=0  # Reset retry counter
                         continue
                         ;;
                     5|*)
-                        _pwrfzf_error "Installation aborted by user"
+                        echo "❌ Installation aborted by user"
                         return 1
                         ;;
                 esac
             
-            # Handle other error types similarly...
             elif [[ ${#masked_packages[@]} -gt 0 ]]; then
-                # [similar immediate handling for masked packages]
-                _pwrfzf_warning "The following packages are masked and cannot be installed:"
+                echo ""
+                echo "🚫 The following packages are masked and cannot be installed:"
                 printf "  - %s\n" "${masked_packages[@]}"
                 echo ""
                 
-                # Immediate options for masked packages
                 echo "══════════════════════════════════════"
                 echo "Would you like to:"
                 echo "1) Unmask the packages (add to package.accept_keywords)"
@@ -1327,28 +1333,36 @@ function _install_packages_with_fallback() {
                 case $choice in
                     1)
                         _unmask_packages "${masked_packages[@]}"
-                        continue
+                        # Update both pretend and real args for consistency
+                        pretend_args=("${real_args[@]}")
+                        echo "🔄 Configuration updated. Returning to main menu to restart installation..."
+                        return 2  # Special return code to indicate config was changed
                         ;;
                     2)
-                        _pwrfzf_verbose "Removing masked packages and retrying..."
+                        echo "⏭️ Removing masked packages and retrying..."
                         for pkg in "${masked_packages[@]}"; do
-                            emerge_args=(${emerge_args[@]//$pkg/})
+                            real_args=(${real_args[@]//$pkg/})
+                            pretend_args=(${pretend_args[@]//$pkg/})
                         done
-                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        # Remove empty arguments
+                        real_args=($(printf '%s\n' "${real_args[@]}" | grep -v '^$'))
+                        pretend_args=($(printf '%s\n' "${pretend_args[@]}" | grep -v '^$'))
+                        echo "🔄 Retrying without masked packages..."
+                        retry_count=0  # Reset retry counter
                         continue
                         ;;
                     3)
                         continue
                         ;;
                     4|*)
-                        _pwrfzf_error "Installation aborted by user"
+                        echo "❌ Installation aborted by user"
                         return 1
                         ;;
                 esac
             
             elif [[ ${#use_flag_packages[@]} -gt 0 ]]; then
-                # [similar immediate handling for USE flags]
-                _pwrfzf_warning "USE flag changes are required for the following packages:"
+                echo ""
+                echo "⚙️ USE flag changes are required for the following packages:"
                 printf "  - %s\n" "${use_flag_packages[@]}"
                 
                 if [[ ${#use_flag_suggestions[@]} -gt 0 ]]; then
@@ -1362,7 +1376,6 @@ function _install_packages_with_fallback() {
                 fi
                 echo ""
                 
-                # Immediate options for USE flags
                 echo "══════════════════════════════════════"
                 echo "Would you like to:"
                 echo "1) Manage USE flags for these packages"
@@ -1378,42 +1391,78 @@ function _install_packages_with_fallback() {
                 case $use_choice in
                     1)
                         _manage_use_flags_interactive "${use_flag_packages[@]}"
-                        continue
+                        # Update both pretend and real args for consistency
+                        pretend_args=("${real_args[@]}")
+                        echo "🔄 Configuration updated. Returning to main menu to restart installation..."
+                        return 2  # Special return code to indicate config was changed
                         ;;
                     2)
                         _apply_suggested_use_flags "${use_flag_suggestions[@]}"
-                        continue
+                        # Update both pretend and real args for consistency
+                        pretend_args=("${real_args[@]}")
+                        echo "🔄 Configuration updated. Returning to main menu to restart installation..."
+                        return 2  # Special return code to indicate config was changed
                         ;;
                     3)
-                        emerge_args=("--autounmask-use" "${emerge_args[@]}")
+                        real_args=("--autounmask-use" "${real_args[@]}")
+                        pretend_args=("--autounmask-use" "${pretend_args[@]}")
                         continue
                         ;;
                     4)
-                        _pwrfzf_verbose "Removing packages requiring USE flag changes..."
+                        echo "⏭️ Removing packages requiring USE flag changes..."
                         for pkg in "${use_flag_packages[@]}"; do
-                            emerge_args=(${emerge_args[@]//$pkg/})
+                            real_args=(${real_args[@]//$pkg/})
+                            pretend_args=(${pretend_args[@]//$pkg/})
                         done
-                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        # Remove empty arguments
+                        real_args=($(printf '%s\n' "${real_args[@]}" | grep -v '^$'))
+                        pretend_args=($(printf '%s\n' "${pretend_args[@]}" | grep -v '^$'))
+                        echo "🔄 Retrying without problematic packages..."
+                        retry_count=0  # Reset retry counter
                         continue
                         ;;
                     5|*)
-                        _pwrfzf_error "Installation aborted by user"
+                        echo "❌ Installation aborted by user"
                         return 1
                         ;;
                 esac
             else
-                # Some other error occurred
+                echo "❌ Unknown dependency issue. Aborting installation."
+                return 1
+            fi
+        else
+            # Pretend succeeded, proceed with actual installation
+            echo ""
+            echo "Attempt $((retry_count + 1)) of $max_retries"
+            echo "══════════════════════════════════════"
+            echo "Proceeding with actual installation..."
+            echo ""
+
+            # Try to install packages with --ask for confirmation
+            ${EMERGE_CMD} "${real_args[@]}"
+            local emerge_exit_code=$?
+            
+            if [[ $emerge_exit_code -eq 0 ]]; then
+                echo "✅ Package installation completed successfully"
+                return 0
+            elif [[ $emerge_exit_code -eq 130 ]] || [[ $emerge_exit_code -eq 1 ]]; then
+                # Exit code 130 (SIGINT) or 1 typically means user cancelled
+                echo "⏹️ Installation cancelled by user"
+                return 130  # Special return code for user cancellation
+            else
+                ((retry_count++))
                 if [[ $retry_count -lt $max_retries ]]; then
-                    _pwrfzf_warning "Installation failed. Retry $retry_count of $max_retries..."
+                    echo "⚠️ Installation failed. Retry $retry_count of $max_retries..."
                     sleep 2
                 else
-                    _pwrfzf_error "Installation failed after $max_retries attempts"
+                    echo "❌ Installation failed after $max_retries attempts"
                     return 1
                 fi
-            fi
+            fi            
+        fi
     done
     
-    _pwrfzf_error "Maximum retry attempts reached"
+    echo "❌ Maximum retry attempts reached"
     return 1
 }
 
@@ -1421,7 +1470,7 @@ function _install_packages_with_fallback() {
 function _apply_suggested_use_flags() {
     local suggestions=("$@")
     
-    _pwrfzf_verbose "Applying suggested USE flag changes..."
+    echo "🔧 Applying suggested USE flag changes..."
     
     for suggestion in "${suggestions[@]}"; do
         local pkg="${suggestion%:*}"
@@ -1459,7 +1508,7 @@ function _apply_suggested_use_flags() {
         config_file=$(echo "$config_file" | grep -E '^/etc/portage/' | head -1)
         
         if [[ -z "$config_file" ]] || [[ ! "$config_file" =~ ^/etc/portage/ ]]; then
-            _pwrfzf_error "Invalid file selected for $package_atom"
+            echo "❌ Invalid file selected for $package_atom"
             continue
         fi
         
@@ -1482,17 +1531,20 @@ function _apply_suggested_use_flags() {
             
             # Validate the entry was written correctly
             if ${PRIV_ESC} grep -q "$package_atom" "$config_file" 2>/dev/null; then
-                _pwrfzf_success "Added to $config_file: $use_entry"
+                echo "✅ Added to $config_file: $use_entry"
                 
                 # Show what was actually written
                 echo "Written to file: $use_entry"
             else
-                _pwrfzf_error "Failed to verify entry in $config_file"
+                echo "❌ Failed to verify entry in $config_file"
             fi
         else
-            _pwrfzf_warning "Skipped USE flag change for $pkg"
+            echo "⚠️ Skipped USE flag change for $pkg"
         fi
     done
+    
+    # Return success to allow retry
+    return 0
 }
 
 # Interactive USE flag management for packages
@@ -1858,8 +1910,6 @@ function _add_unmask_entry() {
 # Main function
 function main() {
     local ARGS=() emerge_args=() SearchInput
-    
-    # Handle command line options
     while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
@@ -1908,70 +1958,86 @@ function main() {
     [[ ${#emerge_args[@]} -eq 0 ]] && emerge_args=("--ask")
     SearchInput="${ARGS[*]}"
     
+    # Store selected packages for automatic retry
+    local last_selected_packages=()
+    local auto_retry=false
+    
     # Main package management loop
     while true; do
         local PICKS=()
-        __emerge_list "$SearchInput" | fzf \
-            --bind "ctrl-r:execute:${EMERGE_CMD} -aC \$(echo {1} | cut -d':' -f1)" \
-            --bind "ctrl-w:execute:${PRIV_ESC} emaint sync -a && ${EMERGE_CMD} -avuDN @world" \
-            --bind "ctrl-z:execute:${EMERGE_CMD} -1 @preserved-rebuild" \
-            --bind "ctrl-s:execute:${PRIV_ESC} emaint sync -a" \
-            --bind "ctrl-o:execute:${BASH_SOURCE[0]} -c" \
-            --bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
-            --bind 'ctrl-l:clear-query+clear-screen+clear-selection' \
-            --bind 'alt-bspace:clear-query' \
-            --bind 'alt-left:kill-word' \
-            --bind "esc:abort" \
-            --bind 'ctrl-q:abort' \
-            --bind 'ctrl-d:deselect-all' \
-            --bind 'ctrl-i:select-all' \
-            --bind 'ctrl-v:toggle-preview' \
-            --bind 'ctrl-n:next-history' \
-            --bind 'ctrl-b:previous-history' \
-            --bind 'right:first' \
-            --bind 'left:last' \
-            --bind 'end:first' \
-            --bind 'home:last' \
-            --bind 'pgdn:page-down' \
-            --bind 'pgup:page-up' \
-            --bind 'shift-tab:deselect' \
-            --bind 'tab:select' \
-            --bind "?:preview(echo '$(_pwrfzf_keys)')" \
-            --bind "change:first" \
-            --header 'Press ? for keybindings | Ctrl+o: Config | Ctrl+s: Sync | Ctrl+z: Preserved' \
-            --header-lines=1 \
-            --preview-window "$PWRFZF_PREVIEW_WINDOW" \
-            --history="$PWRFZF_HISTORY" \
-            --query="${SearchInput}" \
-            --preview-label-pos=top \
-            --border-label-pos=3 \
-            --border 'double' \
-            --preview-label="╣${SearchInput:-pwrfzf}╠" \
-            --border-label="┨${PROG}┠" \
-            --info=inline \
-            --scroll-off=20 \
-            --hscroll-off=30 \
-            --ellipsis="⣿" \
-            --tiebreak=begin \
-            --sync \
-            --multi \
-            --delimiter ' ' \
-            --ansi \
-            --color="${pwrfzf_colortheme}" \
-            --preview="bash -c '\"${BASH_SOURCE[0]}\" __fzf_preview {1}'" | while read -r line; do
-                PICKS+=("$line")
-            done
         
-        if [[ ${#PICKS[@]} -eq 0 ]]; then
-            exit 0
-        fi
-        
-        declare -a PKGS
-        for PICK in "${PICKS[@]}"; do
-            if [[ "$PICK" =~ ^([^:]+) ]]; then
-                PKGS+=("${BASH_REMATCH[1]}")
+        # If we're in auto-retry mode, skip FZF and use last selected packages
+        if [[ "$auto_retry" == "true" && ${#last_selected_packages[@]} -gt 0 ]]; then
+            echo "🔄 Auto-retrying installation with previously selected packages..."
+            PKGS=("${last_selected_packages[@]}")
+            auto_retry=false
+        else
+            # Normal FZF selection
+            __emerge_list "$SearchInput" | fzf \
+                --bind "ctrl-r:execute:${EMERGE_CMD} -aC \$(echo {1} | cut -d':' -f1)" \
+                --bind "ctrl-w:execute:${PRIV_ESC} emaint sync -a && ${EMERGE_CMD} -avuDN @world" \
+                --bind "ctrl-z:execute:${EMERGE_CMD} -1 @preserved-rebuild" \
+                --bind "ctrl-s:execute:${PRIV_ESC} emaint sync -a" \
+                --bind "ctrl-o:execute:${BASH_SOURCE[0]} -c" \
+                --bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
+                --bind 'ctrl-l:clear-query+clear-screen+clear-selection' \
+                --bind 'alt-bspace:clear-query' \
+                --bind 'alt-left:kill-word' \
+                --bind "esc:abort" \
+                --bind 'ctrl-q:abort' \
+                --bind 'ctrl-d:deselect-all' \
+                --bind 'ctrl-i:select-all' \
+                --bind 'ctrl-v:toggle-preview' \
+                --bind 'ctrl-n:next-history' \
+                --bind 'ctrl-b:previous-history' \
+                --bind 'right:first' \
+                --bind 'left:last' \
+                --bind 'end:first' \
+                --bind 'home:last' \
+                --bind 'pgdn:page-down' \
+                --bind 'pgup:page-up' \
+                --bind 'shift-tab:deselect' \
+                --bind 'tab:select' \
+                --bind "?:preview(echo '$(_pwrfzf_keys)')" \
+                --bind "change:first" \
+                --header 'Press ? for keybindings | Ctrl+o: Config | Ctrl+s: Sync | Ctrl+z: Preserved' \
+                --header-lines=1 \
+                --preview-window "$PWRFZF_PREVIEW_WINDOW" \
+                --history="$PWRFZF_HISTORY" \
+                --query="${SearchInput}" \
+                --preview-label-pos=top \
+                --border-label-pos=3 \
+                --border 'double' \
+                --preview-label="╣${SearchInput:-pwrfzf}╠" \
+                --border-label="┨${PROG}┠" \
+                --info=inline \
+                --scroll-off=20 \
+                --hscroll-off=30 \
+                --ellipsis="⣿" \
+                --tiebreak=begin \
+                --sync \
+                --multi \
+                --delimiter ' ' \
+                --ansi \
+                --color="${pwrfzf_colortheme}" \
+                --preview="bash -c '\"${BASH_SOURCE[0]}\" __fzf_preview {1}'" | while read -r line; do
+                    PICKS+=("$line")
+                done
+            
+            if [[ ${#PICKS[@]} -eq 0 ]]; then
+                exit 0
             fi
-        done
+            
+            declare -a PKGS
+            for PICK in "${PICKS[@]}"; do
+                if [[ "$PICK" =~ ^([^:]+) ]]; then
+                    PKGS+=("${BASH_REMATCH[1]}")
+                fi
+            done
+            
+            # Store the selected packages for potential auto-retry
+            last_selected_packages=("${PKGS[@]}")
+        fi
         
         if [[ ${PWRFZF_CONFIRM_ACTIONS} == "true" ]]; then
             echo "══════════════════════════════════════"
@@ -1983,18 +2049,42 @@ function main() {
             read -r answer
             if [[ "$answer" =~ ^[Yy]$ ]]; then
                 _install_packages_with_fallback "${emerge_args[@]}" "${PKGS[@]}"
+                local install_result=$?
+                if [[ $install_result -eq 2 ]]; then
+                    echo "🔄 Configuration updated. Auto-retrying installation..."
+                    auto_retry=true
+                    # Continue to next loop iteration which will auto-retry
+                    continue
+                elif [[ $install_result -eq 130 ]]; then
+                    echo "⏹️ Installation cancelled by user"
+                    # Don't auto-retry, just continue to next selection
+                    continue
+                fi
             else
-                _pwrfzf_warning "Installation cancelled"
+                echo "⚠️ Installation cancelled"
             fi
         else
             _install_packages_with_fallback "${emerge_args[@]}" "${PKGS[@]}"
+            local install_result=$?
+            if [[ $install_result -eq 2 ]]; then
+                echo "🔄 Configuration updated. Auto-retrying installation..."
+                auto_retry=true
+                # Continue to next loop iteration which will auto-retry
+                continue
+            elif [[ $install_result -eq 130 ]]; then
+                echo "⏹️ Installation cancelled by user"
+                # Don't auto-retry, just continue to next selection
+                continue
+            fi
         fi
+
+        # Reset auto_retry flag for next selection
+        auto_retry=false
     done
 }
 
 # Main script execution
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Handle subcommands first
     case "${1:-}" in
         _config_preview)
             _config_preview "$2"
