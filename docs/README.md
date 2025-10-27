@@ -51,7 +51,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 **By using PWRFZF, you acknowledge that you understand these risks and accept full responsibility for any consequences to your system.**
 
-*Last updated: $(date +%Y-%m-%d)*
+*Last updated: 2025-10-27*
 
 # PWRFZF - Powerful Gentoo Package Manager with FZF
 
