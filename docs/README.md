@@ -39,7 +39,7 @@
 ```
 git clone https://github.com/spikyatlinux/pwrfzf.git
 cd pwrfzf
-sudo cp pwrfzf /usr/local/bin/
+sudo cp -v ./bin/pwrfzf /usr/local/bin/
 ```
 
 # Ensure you have the required dependencies installed:
@@ -49,7 +49,7 @@ emerge --ask fzf eix app-portage/portage-utils
 
 # Basic Package Management
 ```
-# Interactive package browser
+# Interactive tui package browser
 pwrfzf
 
 # Search for specific packages
