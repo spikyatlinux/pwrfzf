@@ -167,7 +167,7 @@ PWRFZF_SHOW_INSTALLED=true
 PWRFZF_AUTO_SYNC=false
 PWRFZF_CONFIRM_ACTIONS=true
 PWRFZF_MAX_PREVIEW_LINES=50
-PWRFZF_LOGGING=false
+PWRFZF_LOGGING=true
 
 # Layout
 PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
@@ -176,12 +176,12 @@ PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
 EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
 
 # Privilege escalation (sudo/doas/empty for root)
-# PRIV_ESC="sudo"
+PRIV_ESC="sudo"
 # PRIV_ESC="doas"
 # PRIV_ESC=""  # for root
 
 # Additional environment variables
-# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose --quiet-build=y"
+# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose"
 # export NO_COLOR=false
 EOF
     _pwrfzf_verbose "Created default configuration: $PWRFZF_CONFIG_FILE"
