@@ -70,9 +70,51 @@ function _pwrfzf_init() {
 # Setup logging based on configuration
 function _setup_logging() {
     if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
-        # Don't use exec redirection as it interferes with FZF
-        # Instead, we'll log specific actions manually
-        _pwrfzf_verbose "Logging enabled: ${PWRFZF_CONFIG_DIR}/pwrfzf.log"
+        # Create log file and set up logging
+        local log_file="${PWRFZF_CONFIG_DIR}/pwrfzf.log"
+        touch "$log_file" 2>/dev/null || {
+            _pwrfzf_warning "Cannot create log file: $log_file"
+            return
+        }
+        
+        # Log startup
+        {
+            echo "=== PWRFZF Started $(date) ==="
+            echo "Version: $PWRFZF_VERSION"
+            echo "User: $(whoami)"
+            echo "Arguments: $*"
+            echo "=== ==="
+        } >> "$log_file"
+        
+        # Function to log messages
+        _pwrfzf_log() {
+            if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$log_file"
+            fi
+        }
+        
+        # Redirect verbose messages to log
+        function _pwrfzf_verbose() {
+            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@"
+            _pwrfzf_log "VERBOSE: $*"
+        }
+        
+        function _pwrfzf_error() {
+            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+            _pwrfzf_log "ERROR: $*"
+        }
+        
+        function _pwrfzf_warning() {
+            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Yellow]}${pwrfzf_color[Black]} WARNING ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Yellow]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+            _pwrfzf_log "WARNING: $*"
+        }
+        
+        function _pwrfzf_success() {
+            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Green]}${pwrfzf_color[Black]} SUCCESS ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Green]}%s${pwrfzf_color[Reset]}\n" "$@"
+            _pwrfzf_log "SUCCESS: $*"
+        }
+        
+        _pwrfzf_verbose "Logging enabled: $log_file"
     fi
 }
 
@@ -506,7 +548,7 @@ function _manage_portage_config() {
     
     while true; do
         local action
-        action=$(echo -e "Preview files\nEdit files\nAdd new entry\nBack" | fzf \
+        action=$(echo -e "Preview files\nEdit files\nDelete files\nAdd new entry\nBack" | fzf \
             --bind 'esc:abort' \
             --header "Manage package.$config_type" \
             --preview-window 'right,60%,border-left' \
@@ -524,6 +566,9 @@ function _manage_portage_config() {
             "Edit files")
                 _edit_config_files "$config_type"
                 ;;
+            "Delete files")
+                _delete_config_files_interactive "$config_type"
+                ;;
             "Add new entry")
                 _add_config_entry "$config_type"
                 ;;
@@ -531,6 +576,83 @@ function _manage_portage_config() {
                 break
                 ;;
         esac
+    done
+}
+
+function _delete_config_files_interactive() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    
+    if [[ ! -e "$config_base" ]]; then
+        echo "No configuration found for package.$config_type"
+        return
+    fi
+    
+    # For package.env, also include the env directory
+    local all_files=()
+    if [[ "$config_type" == "env" && -d "/etc/portage/env" ]]; then
+        while IFS= read -r -d '' file; do
+            all_files+=("$file")
+        done < <(find "/etc/portage/env" -type f -print0 2>/dev/null)
+    fi
+    
+    if [[ -d "$config_base" ]]; then
+        while IFS= read -r -d '' file; do
+            all_files+=("$file")
+        done < <(find "$config_base" -type f -print0 2>/dev/null)
+    elif [[ -f "$config_base" ]]; then
+        all_files+=("$config_base")
+    fi
+    
+    if [[ ${#all_files[@]} -eq 0 ]]; then
+        echo "No files found for package.$config_type"
+        return
+    fi
+    
+    echo "══════════════════════════════════════"
+    echo "🗑️  DELETE CONFIGURATION FILES"
+    echo "Config type: package.$config_type"
+    echo ""
+    
+    while true; do
+               local selected_file
+        selected_file=$(printf '%s\n' "${all_files[@]}" | fzf \
+            --bind 'enter:accept' \
+            --bind 'esc:abort' \
+            --header "Select file to delete (Enter=delete, ESC=back)" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - Delete Files┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="bash -c 'echo \"=== {}\" ===; echo \"Size: \$(du -h {} 2>/dev/null | cut -f1)\"; echo \"Lines: \$(wc -l < {} 2>/dev/null || echo 0)\"; echo \"Modified: \$(stat -c %y {} 2>/dev/null | cut -d. -f1)\"; echo \"══════════════════════════════════════\"; cat {} 2>/dev/null | head -20'")
+
+        if [[ -z "$selected_file" ]]; then
+            break
+        fi
+        
+        _delete_config_file "$selected_file" "$config_type"
+        
+        # Refresh file list after deletion
+        all_files=()
+        if [[ "$config_type" == "env" && -d "/etc/portage/env" ]]; then
+            while IFS= read -r -d '' file; do
+                all_files+=("$file")
+            done < <(find "/etc/portage/env" -type f -print0 2>/dev/null)
+        fi
+        if [[ -d "$config_base" ]]; then
+            while IFS= read -r -d '' file; do
+                all_files+=("$file")
+            done < <(find "$config_base" -type f -print0 2>/dev/null)
+        elif [[ -f "$config_base" ]]; then
+            all_files+=("$config_base")
+        fi
+        
+        if [[ ${#all_files[@]} -eq 0 ]]; then
+            echo "No more files to delete."
+            break
+        fi
     done
 }
 
@@ -568,40 +690,51 @@ function _manage_sets() {
     done
 }
 
-function _sets_action_preview() {
+function _action_preview() {
     local action="$1"
+    local config_type="$2"
     
     case "$action" in
-        "View sets.conf")
-            echo "View sets.conf configuration"
-            echo "Shows global sets configuration"
+        "Preview files")
+            echo "Preview all configuration files"
+            echo "Shows complete content of all files"
             echo ""
-            echo "Preview:"
-            cat "/etc/portage/sets.conf" 2>/dev/null | head -10 || echo "No sets.conf found"
+            echo "Preview of first file:"
+            local config_base="/etc/portage/package.$config_type"
+            local first_file=$(find "$config_base" -type f 2>/dev/null | head -1)
+            if [[ -n "$first_file" ]]; then
+                echo "File: $first_file"
+                cat "$first_file" 2>/dev/null | head -5
+            fi
             ;;
-        "Edit sets.conf")
-            echo "Edit sets.conf configuration"
-            echo "Modify global sets configuration"
+        "Edit files")
+            echo "Edit configuration files"
+            echo "Select and edit individual files"
             echo ""
-            echo "File: /etc/portage/sets.conf"
+            echo "Available files:"
+            find "/etc/portage/package.$config_type" -type f 2>/dev/null | head -5
             ;;
-        "Browse package sets")
-            echo "Browse package set files"
-            echo "View and edit individual package sets"
+        "Delete files")
+            echo "Delete configuration files"
+            echo "Permanently remove configuration files"
             echo ""
-            echo "Available sets:"
-            find "/etc/portage/sets" -type f 2>/dev/null | head -5 | while read -r file; do
-                echo "• $(basename "$file")"
-            done
+            echo "Available files for deletion:"
+            find "/etc/portage/package.$config_type" -type f 2>/dev/null | head -5
+            echo ""
+            echo "⚠️  WARNING: This action cannot be undone!"
             ;;
-        "Add package set")
-            echo "Create new package set"
-            echo "Add a new set of packages"
+        "Add new entry")
+            echo "Add new configuration entry"
+            echo "Add package with keywords, USE flags, etc."
             echo ""
-            echo "Example set file:"
-            echo "app-editors/neovim"
-            echo "app-shells/zsh"
-            echo "sys-apps/htop"
+            echo "Example:"
+            case "$config_type" in
+                accept_keywords) echo "dev-util/github-cli ~amd64" ;;
+                use) echo "www-client/firefox -gtk +wayland pulseaudio" ;;
+                mask) echo ">app-office/libreoffice-7.6.0" ;;
+                unmask) echo "app-emulation/wine-proton" ;;
+                env) echo "app-editors/neovim noinfo debug" ;;
+            esac
             ;;
     esac
 }
@@ -751,6 +884,39 @@ function _edit_config_files() {
         
         _launch_editor "$selected_file"
     done
+}
+
+function _delete_config_file() {
+    local file_path="$1"
+    local config_type="$2"
+    
+    echo "══════════════════════════════════════"
+    echo "🗑️  DELETE CONFIGURATION FILE"
+    echo "File: $file_path"
+    echo "Type: package.$config_type"
+    echo ""
+    echo "WARNING: This will permanently delete the file!"
+    echo ""
+    echo "Are you absolutely sure? (type 'yes' to confirm, any other like 'n' will cancel)"
+    read -r confirmation
+    
+    if [[ "$confirmation" == "yes" ]]; then
+        if ${PRIV_ESC} rm -f "$file_path"; then
+            echo "✅ File deleted: $file_path"
+            
+            # Also remove empty parent directories
+            local parent_dir=$(dirname "$file_path")
+            if [[ -d "$parent_dir" ]] && [[ "$parent_dir" != "/etc/portage" ]]; then
+                if ${PRIV_ESC} rmdir "$parent_dir" 2>/dev/null; then
+                    echo "✅ Removed empty directory: $parent_dir"
+                fi
+            fi
+        else
+            echo "❌ Failed to delete file: $file_path"
+        fi
+    else
+        echo "⚠️ Deletion cancelled"
+    fi
 }
 
 function _launch_editor() {
