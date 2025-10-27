@@ -1,0 +1,17 @@
+#compdef pwrfzf
+
+_pwrfzf() {
+  local -a args
+
+  args=(
+    '(-h --help:)'{-h,--help}'[Show the help documentation (-h shows simple help, --help shows extended help)]'
+    '(-k --keybindings)'{-k,--keybindings}'[List keybindings for pwrfzf]'
+    '(-V --version)'{-V,--version}'[Show version of pwrfzf]'
+  )
+
+  _arguments -C \
+    "${args[@]}" \
+    ':query:_files'
+}
+
+_pwrfzf "${@}"

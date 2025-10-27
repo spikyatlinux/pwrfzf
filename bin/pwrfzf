@@ -1,0 +1,2020 @@
+#!/usr/bin/env bash
+# vim:filetype=zsh:shiftwidth=2:softtabstop=2:expandtab:foldmethod=marker:foldmarker=###{{{,###}}}
+
+# PWRFZF - Powerful Gentoo Package Manager with FZF
+# A comprehensive interactive package and repository management tool for Gentoo Linux
+
+# Re-execute the script in bash if not running in bash or zsh
+if [ -z "$BASH_VERSION" ] && [ -z "$ZSH_VERSION" ]; then
+  exec bash "$0" "$@"
+fi
+
+# Check and set options for bash
+if [ -n "$BASH_VERSION" ]; then
+  shopt -s lastpipe
+  export SHELL=bash
+fi
+
+# Define constants and default values
+PWRFZF_VERSION="2.0"
+PROG="pwrfzf"
+AUTHOR="spikyatlinux"
+REPO="https://github.com/${AUTHOR}/${PROG}"
+
+# Configuration directories
+PWRFZF_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/${PROG}"
+PWRFZF_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/${PROG}"
+PWRFZF_CONFIG_FILE="${PWRFZF_CONFIG_DIR}/pwrfzf-config"
+PWRFZF_HISTORY="${PWRFZF_CACHE_DIR}/history"
+PWRFZF_INSTALL_LIST="${PWRFZF_CACHE_DIR}/install_list"
+PWRFZF_LAYOUT_FILE="${PWRFZF_CACHE_DIR}/layout"
+
+# Default configuration variables
+PWRFZF_PREVIEW_WINDOW="${PWRFZF_PREVIEW_WINDOW:-right,60%,border-left}"
+PWRFZF_SHOW_INSTALLED="${PWRFZF_SHOW_INSTALLED:-true}"
+PWRFZF_AUTO_SYNC="${PWRFZF_AUTO_SYNC:-false}"
+PWRFZF_CONFIRM_ACTIONS="${PWRFZF_CONFIRM_ACTIONS:-true}"
+PWRFZF_MAX_PREVIEW_LINES="${PWRFZF_MAX_PREVIEW_LINES:-50}"
+PWRFZF_LOGGING="${PWRFZF_LOGGING:-false}"
+
+# Global variables
+declare -g PWRFZF_MODE="packages"
+declare -g PWRFZF_LAYOUT="default"
+declare -g PRIV_ESC
+declare -g EMERGE_CMD
+declare -gA pwrfzf_color pwrfzf_fx
+
+# Portage configuration types
+declare -gA PORTAGE_CONFIG_TYPES=(
+    [accept_keywords]="Keywords (~amd64, etc.)"
+    [use]="USE flags"
+    [mask]="Masked packages" 
+    [unmask]="Unmasked packages"
+    [env]="Environment settings"
+    [sets]="Package sets"
+)
+
+# Initialize script
+function _pwrfzf_init() {
+    _check_dependencies
+    _create_directories
+    _load_config
+    _setup_logging
+    _set_colors
+    _set_fx
+    _find_privilege_escalator
+    _find_emerge
+    _load_layout
+}
+
+# Setup logging based on configuration
+function _setup_logging() {
+    if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
+        exec > >(tee -a "${PWRFZF_CONFIG_DIR}/pwrfzf.log") 2>&1
+        _pwrfzf_verbose "Logging enabled: ${PWRFZF_CONFIG_DIR}/pwrfzf.log"
+    fi
+}
+
+# Check for required dependencies
+function _check_dependencies() {
+    local deps=("fzf" "eix" "qlist" "qsearch")
+    local missing=()
+    
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            missing+=("$dep")
+        fi
+    done
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        _pwrfzf_error "Missing dependencies: ${missing[*]}"
+        _pwrfzf_warning "Install with: emerge --ask ${missing[*]}"
+        exit 1
+    fi
+}
+
+# Find privilege escalator (sudo/doas)
+function _find_privilege_escalator() {
+    if [[ $EUID -eq 0 ]]; then
+        PRIV_ESC=""
+        return
+    fi
+    
+    if command -v sudo >/dev/null 2>&1; then
+        PRIV_ESC="sudo"
+    elif command -v doas >/dev/null 2>&1; then
+        PRIV_ESC="doas"
+    else
+        _pwrfzf_error "Neither sudo nor doas found. Install one or run as root."
+        exit 1
+    fi
+}
+
+# Create necessary directories
+function _create_directories() {
+    local dirs=("$PWRFZF_CACHE_DIR" "$PWRFZF_CONFIG_DIR")
+    
+    for dir in "${dirs[@]}"; do
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir" 2>/dev/null || {
+                _pwrfzf_error "Failed to create directory: $dir"
+                exit 1
+            }
+        fi
+    done
+    
+    # Create files if they don't exist
+    touch "$PWRFZF_HISTORY" "$PWRFZF_INSTALL_LIST" 2>/dev/null
+}
+
+# Load configuration file
+function _load_config() {
+    if [[ -f "$PWRFZF_CONFIG_FILE" ]]; then
+        source "$PWRFZF_CONFIG_FILE" 2>/dev/null || {
+            _pwrfzf_warning "Error loading config file. Using defaults."
+        }
+    else
+        _create_default_config
+    fi
+}
+
+# Create default configuration file
+function _create_default_config() {
+    cat > "$PWRFZF_CONFIG_FILE" << 'EOF'
+# PWRFZF Configuration File
+# Colors and display
+NO_COLOR=false
+NO_FX=false
+
+# Behavior
+PWRFZF_SHOW_INSTALLED=true
+PWRFZF_AUTO_SYNC=false
+PWRFZF_CONFIRM_ACTIONS=true
+PWRFZF_MAX_PREVIEW_LINES=50
+PWRFZF_LOGGING=true
+
+# Layout
+PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
+
+# Emerge options
+EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
+EOF
+    _pwrfzf_verbose "Created default configuration: $PWRFZF_CONFIG_FILE"
+}
+
+# Set color theme and color definitions
+function _set_colors() {
+    if [[ "${NO_COLOR}" != "true" && "${NO_COLOR}" != "1" ]]; then
+        pwrfzf_colortheme="hl:italic:#FFFF00,hl+:bold:underline:#FF0000"
+        pwrfzf_colortheme+=",fg:#98A0C5,fg+:bold:underline:#FFFFFF"
+        pwrfzf_colortheme+=",bg:#13172A,bg+:#0F1222"
+        pwrfzf_colortheme+=",border:#75A2F7,label:bold:#75A2F7"
+        pwrfzf_colortheme+=",preview-fg:bold:#C0CAF5,preview-bg:#0F1222"
+        pwrfzf_colortheme+=",marker:#00FF00,gutter:#0F1222,pointer:#FF0000"
+        pwrfzf_colortheme+=",query:#FF0000,info:italic:#98A0C5,spinner:#00FFFF,header:italic:#75A2F7"
+        COLOR_WHEN="always"
+        pwrfzf_color=(
+            [Reset]='\x1B[0m'
+            [Bold]='\x1B[1m'
+            [Italic]='\x1B[3m'
+            [Underline]='\x1B[4m'
+            [Black]='\x1B[38;5;0m'
+            [Gray]='\x1B[38;5;245m'
+            [White]='\x1B[38;5;15m'
+            [Red]='\x1B[38;5;196m'
+            [Green]='\x1B[38;5;46m'
+            [Yellow]='\x1B[38;5;190m'
+            [Blue]='\x1B[38;5;33m'
+            [Cyan]='\x1B[38;5;87m'
+            [BG_Black]='\x1B[48;5;0m'
+            [BG_Gray]='\x1B[48;5;245m'
+            [BG_White]='\x1B[48;5;15m'
+            [BG_Red]='\x1B[48;5;196m'
+            [BG_Green]='\x1B[48;5;46m'
+            [BG_Yellow]='\x1B[48;5;190m'
+            [BG_Blue]='\x1B[48;5;33m'
+            [BG_Cyan]='\x1B[48;5;87m'
+        )
+    else
+        pwrfzf_colortheme="fg:#FFFFFF"
+        COLOR_WHEN="never"
+    fi
+}
+
+# Set terminal effects if NO_FX is not set
+function _set_fx() {
+    if [[ -z ${NO_FX} ]]; then
+        pwrfzf_fx=(
+            [Save_Title]='\x1B[22;0t'
+            [Restore_Title]='\x1B[23;0t'
+        )
+    fi
+}
+
+# Find the emerge command
+function _find_emerge() {
+    if [[ -z $EMERGE_CMD ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            EMERGE_CMD="emerge"
+        else
+            EMERGE_CMD="${PRIV_ESC} emerge"
+        fi
+    fi
+}
+
+# Load layout from file
+function _load_layout() {
+    if [[ -f "$PWRFZF_LAYOUT_FILE" ]]; then
+        PWRFZF_LAYOUT=$(<"$PWRFZF_LAYOUT_FILE")
+    fi
+}
+
+# Save layout to file
+function _save_layout() {
+    echo "$PWRFZF_LAYOUT" > "$PWRFZF_LAYOUT_FILE"
+}
+
+# Functions to print error, warning, and verbose messages
+function _pwrfzf_error() {
+    printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+}
+
+function _pwrfzf_warning() {
+    printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Yellow]}${pwrfzf_color[Black]} WARNING ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Yellow]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+}
+
+function _pwrfzf_verbose() {
+    printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@"
+}
+
+function _pwrfzf_success() {
+    printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Green]}${pwrfzf_color[Black]} SUCCESS ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Green]}%s${pwrfzf_color[Reset]}\n" "$@"
+}
+
+# Display keybindings
+function _pwrfzf_keys() {
+    cat <<EOF
+KEYBINDINGS:
+                     TAB : Select
+               Shift-TAB : Unselect
+                  Ctrl-d : Deselect all
+                  Ctrl-i : Add to install list
+                  Ctrl-r : Uninstall selected
+                  Ctrl-w : Update all world packages
+                  Ctrl-z : Run preserved rebuild
+                  Ctrl-s : Sync repositories
+                  Ctrl-n : History next
+                  Ctrl-b : History previous (back)
+                  Ctrl-/ : Change layout
+                  Ctrl-v : Hide/show preview
+                  Ctrl-o : Open Portage config manager
+                    HOME : Top
+                     END : Bottom
+                  PAGEUP : Scroll one page up
+                PAGEDOWN : Scroll one page down
+                  Ctrl-l : Clear query
+           Alt-backspace : Clear query
+                Alt-left : Delete word
+                 Ctrl-h  : Show help
+                       ? : Show keybindings
+                  Ctrl-q : Exit
+                     ESC : Exit
+EOF
+}
+
+# Display help message
+function _pwrfzf_help() {
+    cat >&2 <<EOF
+NAME:
+  $PROG
+DESCRIPTION:
+  Search, install, remove packages from the Gentoo overlays interactively with fzf
+USAGE:
+  $PROG [options] [search query]
+  $PROG [-V|--version] [-k|--keybindings] [-h|--help] [search query]
+OPTIONS:
+  -h                   Show the help menu
+  --help               Show the extended help menu of $PROG
+  -k, --keybindings    List keybindings for $PROG
+  -V, --version        Show version of $PROG
+  -c, --config         Manage Portage configuration
+  --preserved-rebuild  Run preserved rebuild
+  --sync               Sync repositories
+  For more information, visit the repository at $REPO
+EOF
+}
+
+# Display extended help message
+function _pwrfzf_help_full() {
+    _pwrfzf_help
+    cat >&2 <<EOF
+EXAMPLES:
+  $ $PROG        : Run $PROG with no search query
+  $ $PROG fzf    : Search for 'fzf' with $PROG
+  $ $PROG -c     : Manage Portage configuration
+  $ $PROG --preserved-rebuild : Run preserved rebuild
+  $ $PROG --sync : Sync repositories
+$(_pwrfzf_keys)
+For more information, check out the pwrfzf README
+https://github.com/spikyatlinux/pwrfzf/README.md
+EOF
+}
+
+# Display version
+function _pwrfzf_version() {
+    echo "${PROG}: ${PWRFZF_VERSION}"
+}
+
+# Emerge list function
+function __emerge_list() {
+    qsearch --all | sort -r | grep -E "${1:-.*}"
+}
+
+# Enhanced preview function
+function __fzf_preview() {
+    local package_name=$(echo "$1" | cut -d':' -f1)
+    
+    if [[ -z "$package_name" ]]; then
+        return
+    fi
+    
+    {
+        # Package information
+        eix "$package_name" 2>/dev/null
+        
+        echo
+        echo "════════════════════════════════════════════════════════════════════════════════"
+        echo "PORTAGE CONFIGURATION:"
+        
+        # Check Portage configuration files
+        for config_type in accept_keywords env mask unmask use; do
+            local config_file="/etc/portage/package.$config_type"
+            if [[ -f "$config_file" ]] || [[ -d "$config_file" ]]; then
+                local config_content
+                config_content=$(grep -r "$package_name" "$config_file" 2>/dev/null | head -5)
+                if [[ -n "$config_content" ]]; then
+                    echo
+                    echo "package.$config_type:"
+                    echo "$config_content"
+                fi
+            fi
+        done
+        
+        echo
+        echo "════════════════════════════════════════════════════════════════════════════════"
+        echo "INSTALLED FILES:"
+        qlist "$package_name" 2>/dev/null | head -20
+    } 2>/dev/null
+}
+
+# Portage configuration management
+function _portage_config_manager() {
+    while true; do
+        local config_type
+        config_type=$(echo -e "accept_keywords\nuse\nmask\nunmask\nenv\nsets" | fzf \
+            --bind 'enter:accept' \
+            --bind 'esc:abort' \
+            --header 'Select Portage config type (Enter=select, ESC=back)' \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - Portage Configuration┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="${BASH_SOURCE[0]} _config_preview {}")
+        
+        if [[ -z "$config_type" ]]; then
+            break
+        fi
+        
+        _manage_config_type "$config_type"
+    done
+}
+
+function _config_preview() {
+    local config_type="$1"
+    
+    if [[ "$config_type" == "sets" ]]; then
+        _sets_preview
+    else
+        _portage_config_preview "$config_type"
+    fi
+}
+
+function _portage_config_preview() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    
+    if [[ ! -e "$config_base" ]]; then
+        echo "No configuration found"
+        echo "Create new file or directory at:"
+        echo "$config_base"
+        return
+    fi
+    
+    if [[ -f "$config_base" ]]; then
+        echo "Single file configuration:"
+        echo "File: $config_base"
+        echo "══════════════════════════════════════"
+        cat "$config_base" 2>/dev/null | head -15
+    elif [[ -d "$config_base" ]]; then
+        echo "Directory configuration:"
+        echo "Path: $config_base"
+        echo "Files found:"
+        find "$config_base" -type f 2>/dev/null | head -10 | while read -r file; do
+            echo "• $file"
+        done
+        echo ""
+        local first_file=$(find "$config_base" -type f 2>/dev/null | head -1)
+        if [[ -n "$first_file" ]]; then
+            echo "First file content:"
+            echo "File: $first_file"
+            echo "══════════════════════════════════════"
+            cat "$first_file" 2>/dev/null | head -10
+        fi
+    fi
+    
+    # Special handling for package.env - also check /etc/portage/env directory
+    if [[ "$config_type" == "env" ]]; then
+        local env_dir="/etc/portage/env"
+        if [[ -d "$env_dir" ]]; then
+            echo ""
+            echo "══════════════════════════════════════"
+            echo "Additional environment files in: $env_dir"
+            echo "Files found:"
+            find "$env_dir" -type f 2>/dev/null | head -10 | while read -r file; do
+                echo "• $file"
+            done
+            echo ""
+            local first_env_file=$(find "$env_dir" -type f 2>/dev/null | head -1)
+            if [[ -n "$first_env_file" ]]; then
+                echo "First env file content:"
+                echo "File: $first_env_file"
+                echo "══════════════════════════════════════"
+                cat "$first_env_file" 2>/dev/null | head -10
+            fi
+        fi
+    fi
+}
+
+function _sets_preview() {
+    local sets_dir="/etc/portage/sets"
+    local sets_conf="/etc/portage/sets.conf"
+    
+    echo "Package Sets Configuration"
+    echo "══════════════════════════════════════"
+    
+    if [[ -f "$sets_conf" ]]; then
+        echo "sets.conf:"
+        echo "══════════════════════════════════════"
+        cat "$sets_conf" 2>/dev/null | head -15
+        echo ""
+    fi
+    
+    if [[ -d "$sets_dir" ]]; then
+        echo "Package set files:"
+        find "$sets_dir" -type f 2>/dev/null | head -10 | while read -r file; do
+            echo "• $file"
+        done
+        echo ""
+        local first_file=$(find "$sets_dir" -type f 2>/dev/null | head -1)
+        if [[ -n "$first_file" ]]; then
+            echo "First set file content:"
+            echo "File: $first_file"
+            echo "══════════════════════════════════════"
+            cat "$first_file" 2>/dev/null | head -10
+        fi
+    else
+        echo "No package sets directory found at: $sets_dir"
+    fi
+}
+
+function _manage_config_type() {
+    local config_type="$1"
+    
+    if [[ "$config_type" == "sets" ]]; then
+        _manage_sets
+    else
+        _manage_portage_config "$config_type"
+    fi
+}
+
+function _manage_portage_config() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    
+    while true; do
+        local action
+        action=$(echo -e "Preview files\nEdit files\nAdd new entry\nBack" | fzf \
+            --bind 'esc:abort' \
+            --header "Manage package.$config_type" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - ${PORTAGE_CONFIG_TYPES[$config_type]}┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="${BASH_SOURCE[0]} _action_preview {} $config_type")
+        
+        case "$action" in
+            "Preview files")
+                _view_config_type "$config_type" | less
+                ;;
+            "Edit files")
+                _edit_config_files "$config_type"
+                ;;
+            "Add new entry")
+                _add_config_entry "$config_type"
+                ;;
+            "Back"|"")
+                break
+                ;;
+        esac
+    done
+}
+
+function _manage_sets() {
+    while true; do
+        local action
+        action=$(echo -e "View sets.conf\nEdit sets.conf\nBrowse package sets\nAdd package set\nBack" | fzf \
+            --bind 'esc:abort' \
+            --header "Manage Package Sets" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - Package Sets┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="${BASH_SOURCE[0]} _sets_action_preview {}")
+        
+        case "$action" in
+            "View sets.conf")
+                _view_sets_conf | less
+                ;;
+            "Edit sets.conf")
+                _edit_sets_conf
+                ;;
+            "Browse package sets")
+                _browse_package_sets
+                ;;
+            "Add package set")
+                _add_package_set
+                ;;
+            "Back"|"")
+                break
+                ;;
+        esac
+    done
+}
+
+function _sets_action_preview() {
+    local action="$1"
+    
+    case "$action" in
+        "View sets.conf")
+            echo "View sets.conf configuration"
+            echo "Shows global sets configuration"
+            echo ""
+            echo "Preview:"
+            cat "/etc/portage/sets.conf" 2>/dev/null | head -10 || echo "No sets.conf found"
+            ;;
+        "Edit sets.conf")
+            echo "Edit sets.conf configuration"
+            echo "Modify global sets configuration"
+            echo ""
+            echo "File: /etc/portage/sets.conf"
+            ;;
+        "Browse package sets")
+            echo "Browse package set files"
+            echo "View and edit individual package sets"
+            echo ""
+            echo "Available sets:"
+            find "/etc/portage/sets" -type f 2>/dev/null | head -5 | while read -r file; do
+                echo "• $(basename "$file")"
+            done
+            ;;
+        "Add package set")
+            echo "Create new package set"
+            echo "Add a new set of packages"
+            echo ""
+            echo "Example set file:"
+            echo "app-editors/neovim"
+            echo "app-shells/zsh"
+            echo "sys-apps/htop"
+            ;;
+    esac
+}
+
+function _view_sets_conf() {
+    local sets_conf="/etc/portage/sets.conf"
+    
+    if [[ -f "$sets_conf" ]]; then
+        echo "=== sets.conf ==="
+        echo "══════════════════════════════════════"
+        cat "$sets_conf"
+    else
+        echo "No sets.conf found at: $sets_conf"
+    fi
+}
+
+function _action_preview() {
+    local action="$1"
+    local config_type="$2"
+    
+    case "$action" in
+        "Preview files")
+            echo "Preview all configuration files"
+            echo "Shows complete content of all files"
+            echo ""
+            echo "Preview of first file:"
+            local config_base="/etc/portage/package.$config_type"
+            local first_file=$(find "$config_base" -type f 2>/dev/null | head -1)
+            if [[ -n "$first_file" ]]; then
+                echo "File: $first_file"
+                cat "$first_file" 2>/dev/null | head -5
+            fi
+            ;;
+        "Edit files")
+            echo "Edit configuration files"
+            echo "Select and edit individual files"
+            echo ""
+            echo "Available files:"
+            find "/etc/portage/package.$config_type" -type f 2>/dev/null | head -5
+            ;;
+        "Add new entry")
+            echo "Add new configuration entry"
+            echo "Add package with keywords, USE flags, etc."
+            echo ""
+            echo "Example:"
+            case "$config_type" in
+                accept_keywords) echo "dev-util/github-cli ~amd64" ;;
+                use) echo "www-client/firefox -gtk +wayland pulseaudio" ;;
+                mask) echo ">app-office/libreoffice-7.6.0" ;;
+                unmask) echo "app-emulation/wine-proton" ;;
+                env) echo "app-editors/neovim noinfo debug" ;;
+            esac
+            ;;
+    esac
+}
+
+function _view_config_type() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    
+    if [[ ! -e "$config_base" ]]; then
+        echo "No configuration found for package.$config_type"
+        return
+    fi
+    
+    if [[ -f "$config_base" ]]; then
+        echo "=== Single file: $config_base ==="
+        echo "══════════════════════════════════════"
+        cat "$config_base" 2>/dev/null
+    elif [[ -d "$config_base" ]]; then
+        find "$config_base" -type f 2>/dev/null | while read -r file; do
+            echo ""
+            echo "=== FILE: $file ==="
+            echo "══════════════════════════════════════"
+            cat "$file" 2>/dev/null
+            echo ""
+        done
+    fi
+    
+    # Special handling for package.env - also show /etc/portage/env directory
+    if [[ "$config_type" == "env" && -d "/etc/portage/env" ]]; then
+        echo ""
+        echo "=== ENVIRONMENT FILES (/etc/portage/env/) ==="
+        echo "══════════════════════════════════════"
+        find "/etc/portage/env" -type f 2>/dev/null | while read -r file; do
+            echo ""
+            echo "=== FILE: $file ==="
+            echo "══════════════════════════════════════"
+            cat "$file" 2>/dev/null
+            echo ""
+        done
+    fi
+}
+
+function _edit_config_files() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    
+    if [[ ! -e "$config_base" ]]; then
+        echo "No configuration found. Create new file? (y/N)"
+        read -r answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            _launch_editor "$config_base"
+        fi
+        return
+    fi
+    
+    # For package.env, also include the env directory
+    local all_files=()
+    if [[ "$config_type" == "env" && -d "/etc/portage/env" ]]; then
+        while IFS= read -r -d '' file; do
+            all_files+=("$file")
+        done < <(find "/etc/portage/env" -type f -print0 2>/dev/null)
+    fi
+    
+    if [[ -d "$config_base" ]]; then
+        while IFS= read -r -d '' file; do
+            all_files+=("$file")
+        done < <(find "$config_base" -type f -print0 2>/dev/null)
+    elif [[ -f "$config_base" ]]; then
+        all_files+=("$config_base")
+    fi
+    
+    if [[ ${#all_files[@]} -eq 0 ]]; then
+        echo "No files found for package.$config_type"
+        return
+    fi
+    
+    # File browser
+    while true; do
+        local selected_file
+        selected_file=$(printf '%s\n' "${all_files[@]}" | fzf \
+            --bind 'enter:accept+abort' \
+            --bind 'esc:abort' \
+            --header "Select file to edit (Enter=edit, ESC=back)" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - File Browser┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="echo '=== {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null | head -20")
+        
+        if [[ -z "$selected_file" ]]; then
+            break
+        fi
+        
+        _launch_editor "$selected_file"
+    done
+}
+
+function _launch_editor() {
+    local file_path="$1"
+    local editor
+    
+    # Detect available editors in order of preference
+    if command -v nvim >/dev/null 2>&1; then
+        editor="nvim"
+    elif command -v nano >/dev/null 2>&1; then
+        editor="nano"
+    elif command -v vim >/dev/null 2>&1; then
+        editor="vim"
+    elif command -v vi >/dev/null 2>&1; then
+        editor="vi"
+    elif command -v gedit >/dev/null 2>&1; then
+        editor="gedit"
+    elif command -v kate >/dev/null 2>&1; then
+        editor="kate"
+    elif command -v leafpad >/dev/null 2>&1; then
+        editor="leafpad"
+    else
+        _pwrfzf_error "No editor found! Please install nvim, nano, vim, or another editor."
+        return 1
+    fi
+    
+    # Ensure the file exists
+    if [[ ! -f "$file_path" ]]; then
+        ${PRIV_ESC} mkdir -p "$(dirname "$file_path")"
+        ${PRIV_ESC} touch "$file_path"
+    fi
+    
+    echo "Opening editor for: $file_path"
+    echo "Using: $editor"
+    echo "Press ESC then :wq to save and quit, or :q! to quit without saving"
+    echo "Press any key to continue..."
+    read -n1 -s
+    
+    # Use script to create a clean terminal environment
+    if command -v script >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            script -q -c "$editor '$file_path'" /dev/null
+        else
+            script -q -c "${PRIV_ESC} $editor '$file_path'" /dev/null
+        fi
+    else
+        # Fallback without script command
+        if [[ $EUID -eq 0 ]]; then
+            $editor "$file_path"
+        else
+            ${PRIV_ESC} $editor "$file_path"
+        fi
+    fi
+    
+    # Clear any remaining terminal issues
+    tput reset 2>/dev/null || true
+    stty sane
+}
+
+function _add_config_entry() {
+    local config_type="$1"
+    local package config_entry new_entry config_file
+    
+    # Get package name with clear instructions
+    echo "══════════════════════════════════════"
+    echo "Enter package name (atom):"
+    echo "Example: app-editors/neovim"
+    echo -n "Package: "
+    read -r package
+    [[ -z "$package" ]] && return
+    
+    # Get config value based on type
+    case "$config_type" in
+        accept_keywords)
+            echo ""
+            echo "══════════════════════════════════════"
+            echo "Select keywords for $package:"
+            config_entry=$(echo -e "~amd64\n~arm64\namd64\narm64\n-**" | fzf --prompt "Keywords: ")
+            ;;
+        use)
+            echo ""
+            echo "══════════════════════════════════════"
+            echo "Enter USE flags for $package:"
+            echo "Format: +flag to enable, -flag to disable"
+            echo "Example: +gtk -qt wayland pulseaudio"
+            echo -n "USE flags: "
+            read -r config_entry
+            # Validate USE flags format (basic check)
+            if [[ ! "$config_entry" =~ ^[+-]?[a-zA-Z0-9_]+([[:space:]]+[+-]?[a-zA-Z0-9_]+)*$ ]]; then
+                _pwrfzf_warning "USE flags should start with + or - followed by flag name"
+                echo "Examples: +gtk -qt, +wayland +pulseaudio, -doc -test"
+            fi
+            ;;
+        mask|unmask)
+            echo ""
+            echo "══════════════════════════════════════"
+            echo "Select mask type for $package:"
+            config_entry=$(echo -e "$package\n>$package\n<$package\n=$package" | fzf --prompt "Mask: ")
+            ;;
+        env)
+            echo ""
+            echo "══════════════════════════════════════"
+            echo "Select environment for $package:"
+            config_entry=$(echo -e "noinfo\ndebug\nconfcache\nstrict\ntest" | fzf --prompt "Environment: ")
+            ;;
+        *)
+            echo ""
+            echo "══════════════════════════════════════"
+            echo "Enter configuration for $package:"
+            read -r config_entry
+            ;;
+    esac
+    [[ -z "$config_entry" ]] && return
+    
+    new_entry="$package $config_entry"
+    
+    # Select target file
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "Select target configuration file:"
+    config_file=$(_select_config_file "$config_type")
+    [[ -z "$config_file" ]] && return
+    
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM ADDITION:"
+    echo "Entry: $new_entry"
+    echo "File: $config_file"
+    echo ""
+    echo "Add this entry? (y/N)"
+    read -r answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        # Create directory if needed
+        ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+        echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
+        _pwrfzf_success "Added to $config_file: $new_entry"
+    else
+        _pwrfzf_warning "Addition cancelled"
+    fi
+}
+
+function _select_config_file() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    
+    # Build list of files
+    local all_files=()
+    
+    # For package.env, include the env directory
+    if [[ "$config_type" == "env" && -d "/etc/portage/env" ]]; then
+        while IFS= read -r -d '' file; do
+            all_files+=("$file")
+        done < <(find "/etc/portage/env" -type f -print0 2>/dev/null)
+    fi
+    
+    # Add files from the main config directory
+    if [[ -d "$config_base" ]]; then
+        while IFS= read -r -d '' file; do
+            all_files+=("$file")
+        done < <(find "$config_base" -type f -print0 2>/dev/null)
+    elif [[ -f "$config_base" ]]; then
+        all_files+=("$config_base")
+    fi
+    
+    # If no files exist, go straight to file creation
+    if [[ ${#all_files[@]} -eq 0 ]]; then
+        echo "No existing files found. Creating new file..." >&2
+        _create_new_config_file_simple "$config_type"
+        return
+    fi
+    
+    # Prepare options for fzf
+    local options=()
+    for file in "${all_files[@]}"; do
+        local line_count=$(wc -l < "$file" 2>/dev/null || echo 0)
+        options+=("$file|$file ($line_count lines)")
+    done
+    options+=("[CREATE_NEW]|Create new file")
+    
+    # Show selection
+    local selected
+    selected=$(printf "%s\n" "${options[@]}" | fzf \
+        --delimiter '|' \
+        --with-nth=2 \
+        --prompt "Select file: " \
+        --preview "if [[ {1} == '[CREATE_NEW]' ]]; then echo 'Create new file'; else echo '=== {1} ==='; echo '══════════════════════════════════════'; cat {1} 2>/dev/null | head -20; fi" 2>/dev/null | \
+        cut -d'|' -f1)
+    
+    if [[ "$selected" == "[CREATE_NEW]" ]]; then
+        _create_new_config_file_simple "$config_type"
+    else
+        echo "$selected"
+    fi
+}
+
+function _create_new_config_file_simple() {
+    local config_type="$1"
+    local config_base="/etc/portage/package.$config_type"
+    local default_filename=""
+    
+    # Suggest meaningful default filename
+    case "$config_type" in
+        accept_keywords) default_filename="custom-keywords" ;;
+        use) default_filename="custom-use" ;;
+        mask) default_filename="custom-mask" ;;
+        unmask) default_filename="custom-unmask" ;;
+        env) default_filename="custom-env" ;;
+        *) default_filename="custom-config" ;;
+    esac
+    
+    # Use a temporary file to capture the filename
+    local temp_file=$(mktemp)
+    
+    {
+        echo "══════════════════════════════════════" >&2
+        echo "Create new file for package.$config_type" >&2
+        echo "Enter filename [${default_filename}]:" >&2
+        echo "(Press Enter for default, or type new name)" >&2
+        echo -n "Filename: " >&2
+    }
+    
+    read -r filename
+    filename="${filename:-$default_filename}"
+    filename=$(basename "$filename")
+    
+    # Determine full path
+    local full_path="$config_base/$filename"
+    
+    {
+        echo "" >&2
+        echo "Creating: $full_path" >&2
+    }
+    
+    if ${PRIV_ESC} mkdir -p "$(dirname "$full_path")" && ${PRIV_ESC} touch "$full_path"; then
+        echo "SUCCESS: Created $full_path" >&2
+        # Return ONLY the clean path
+        echo "$full_path"
+        return 0
+    else
+        echo "ERROR: Failed to create $full_path" >&2
+        return 1
+    fi
+}
+
+function _add_keyword_entry() {
+    local package="$1"
+    
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "Unmasking package: $package"
+    
+    # Select keyword
+    local selected_keyword
+    selected_keyword=$(echo -e "~amd64\n~arm64\namd64\narm64\n-**" | fzf --prompt "Select keyword: ")
+    [[ -z "$selected_keyword" ]] && return 1
+    
+    local new_entry="$package $selected_keyword"
+    
+    # Select file - capture output and clean it
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "Select file to add keyword to:"
+    local config_file
+    config_file=$(_select_config_file "accept_keywords")
+    
+    # Clean the config_file variable - remove any non-path content
+    config_file=$(echo "$config_file" | grep -E '^/etc/portage/' | head -1)
+    
+    if [[ -z "$config_file" ]] || [[ ! -f "$config_file" ]]; then
+        _pwrfzf_error "Invalid or no file selected: $config_file"
+        return 1
+    fi
+    
+    # Confirm addition
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM ADDITION:"
+    echo "Entry: $new_entry"
+    echo "File: $config_file"
+    echo ""
+    echo "Add this entry? (y/N)"
+    read -r confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # Ensure directory exists (should already from creation)
+        ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+        
+        # Add the entry to the file
+        if echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null; then
+            _pwrfzf_success "Added to $config_file: $new_entry"
+            
+            # Verify the entry was written
+            if ${PRIV_ESC} grep -q "$package" "$config_file" 2>/dev/null; then
+                _pwrfzf_verbose "Entry successfully verified in file"
+            else
+                _pwrfzf_warning "Entry may not have been written correctly"
+            fi
+            return 0
+        else
+            _pwrfzf_error "Failed to write to $config_file"
+            return 1
+        fi
+    else
+        _pwrfzf_warning "Cancelled"
+        return 1
+    fi
+}
+
+function _edit_sets_conf() {
+    local sets_conf="/etc/portage/sets.conf"
+    _launch_editor "$sets_conf"
+}
+
+function _browse_package_sets() {
+    local sets_dir="/etc/portage/sets"
+    
+    if [[ ! -d "$sets_dir" ]]; then
+        echo "No package sets directory found at: $sets_dir"
+        return
+    fi
+    
+    while true; do
+        local selected_file
+        selected_file=$(find "$sets_dir" -type f 2>/dev/null | fzf \
+            --bind 'enter:accept+abort' \
+            --bind 'esc:abort' \
+            --header "Select package set to edit (Enter=edit, ESC=back)" \
+            --preview-window 'right,60%,border-left' \
+            --border-label-pos=3 \
+            --border 'double' \
+            --border-label="┨${PROG} - Package Sets┠" \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="echo '=== {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null | head -20")
+        
+        if [[ -z "$selected_file" ]]; then
+            break
+        fi
+        
+        _launch_editor "$selected_file"
+    done
+}
+
+function _add_package_set() {
+    local sets_dir="/etc/portage/sets"
+    local set_name new_set_file
+    
+    echo "══════════════════════════════════════"
+    echo "Enter package set name:"
+    echo -n "Set name: "
+    read -r set_name
+    [[ -z "$set_name" ]] && return
+    
+    new_set_file="$sets_dir/$set_name"
+    
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM CREATION:"
+    echo "Package set: $set_name"
+    echo "File: $new_set_file"
+    echo ""
+    echo "Create this package set? (y/N)"
+    read -r answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        ${PRIV_ESC} mkdir -p "$sets_dir"
+        ${PRIV_ESC} touch "$new_set_file"
+        _pwrfzf_success "Created package set: $set_name"
+        
+        echo ""
+        echo "Edit set now? (y/N)"
+        read -r edit_answer
+        if [[ "$edit_answer" =~ ^[Yy]$ ]]; then
+            _launch_editor "$new_set_file"
+        fi
+    fi
+}
+
+# Sync repositories
+function _sync_repositories() {
+    _pwrfzf_verbose "Syncing repositories..."
+    if ${PRIV_ESC} emaint sync --all; then
+        _pwrfzf_success "Repositories synced successfully"
+    else
+        _pwrfzf_error "Failed to sync repositories"
+    fi
+}
+
+# Run preserved rebuild
+function _preserved_rebuild() {
+    _pwrfzf_verbose "Running preserved rebuild..."
+    if ${EMERGE_CMD} -1 @preserved-rebuild; then
+        _pwrfzf_success "Preserved rebuild completed successfully"
+    else
+        _pwrfzf_error "Preserved rebuild failed"
+    fi
+}
+
+# Enhanced package installation with automatic unmasking for both keywords and USE flags
+function _install_packages_with_fallback() {
+    local emerge_args=("$@")
+    local max_retries=3
+    local retry_count=0
+    
+    # Remove --ask from pretend commands to avoid hanging
+    local pretend_args=()
+    for arg in "${emerge_args[@]}"; do
+        if [[ "$arg" != "--ask" ]]; then
+            pretend_args+=("$arg")
+        fi
+    done
+    
+    while [[ $retry_count -lt $max_retries ]]; do
+        # Try to install packages and capture output immediately
+        _pwrfzf_verbose "Attempting installation..."
+        local emerge_output
+        emerge_output=$(${EMERGE_CMD} "${emerge_args[@]}" 2>&1)
+        local emerge_exit_code=$?
+        
+        if [[ $emerge_exit_code -eq 0 ]]; then
+            _pwrfzf_success "Package installation completed successfully"
+            return 0
+        else
+            ((retry_count++))
+            
+            # IMMEDIATE ANALYSIS - use the output we already have from the failed emerge
+            local output="$emerge_output"
+            
+            # QUICK PATTERN MATCHING - no need for another emerge --pretend
+            local masked_packages=()
+            local use_flag_packages=()
+            local use_flag_suggestions=()
+            local circular_deps_packages=()
+            local circular_deps_suggestions=()
+            
+# In the circular dependency detection section:
+            # Check for circular dependencies in the existing output
+            if echo "$output" | grep -q "circular dependencies"; then
+                # Also look for the specific suggestion
+                local fix_line=$(echo "$output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
+                if [[ "$fix_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][a-zA-Z0-9_-]+) ]]; then
+                    local pkg="${BASH_REMATCH[1]}"
+                    local flag="${BASH_REMATCH[2]}"
+                    # Clean the flag for display (remove + and any trailing characters)
+                    local clean_display_flag="${flag#[+-]}"
+                    clean_display_flag="${clean_display_flag%)}"  # Remove trailing parenthesis
+                    # ALWAYS use >= format with the full versioned package
+                    circular_deps_packages=("$pkg")
+                    circular_deps_suggestions=("$pkg:$flag")
+                    
+                    # Store clean version for display
+                    circular_deps_display=("$pkg:$clean_display_flag")
+                fi
+            fi
+            
+                # Also look for the specific suggestion
+                local fix_line=$(echo "$output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
+                if [[ "$fix_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][^[:space:]]+) ]]; then
+                    local pkg="${BASH_REMATCH[1]}"
+                    local flag="${BASH_REMATCH[2]}"
+                    circular_deps_packages=("$pkg")
+                    circular_deps_suggestions=("$pkg:$flag")
+                fi
+            fi
+            
+            # Check for USE flag requirements in existing output
+            local use_line=$(echo "$output" | grep "Change USE:" | head -1)
+            if [[ -n "$use_line" ]]; then
+                if [[ "$use_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][^[:space:]]+) ]]; then
+                    local pkg="${BASH_REMATCH[1]}"
+                    local flag="${BASH_REMATCH[2]}"
+                    # ALWAYS use the versioned package as-is for >= format
+                    use_flag_packages+=("$pkg")
+                    use_flag_suggestions+=("$pkg:$flag")
+                fi
+            fi
+
+            # Check for masked packages in existing output
+            if echo "$output" | grep -q "masked"; then
+                masked_packages=($(echo "$output" | grep -oE '!!!.*"([^"]+)".*masked' | head -3 | sed -E 's/.*"([^"]+)".*/\1/'))
+            fi
+            
+            # IMMEDIATELY SHOW OPTIONS - no delay
+            if [[ ${#circular_deps_packages[@]} -gt 0 ]] || [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
+                _pwrfzf_warning "Circular dependencies detected!"
+                if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
+                    echo "Affected packages:"
+                    printf "  - %s\n" "${circular_deps_packages[@]}"
+                fi
+
+                if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
+                    echo ""
+                    echo "Suggested fixes to break the cycle:"
+                    for suggestion in "${circular_deps_suggestions[@]}"; do
+                        local pkg="${suggestion%:*}"
+                        local flag="${suggestion#*:}"
+                        # Clean the flag for display
+                        local clean_display_flag="${flag#[+-]}"
+                        clean_display_flag="${clean_display_flag%)}"  # Remove trailing parenthesis
+                        echo "  - $pkg: Enable USE flag '$clean_display_flag'"
+                    done
+                fi
+
+                # Offer to fix circular dependencies IMMEDIATELY
+                echo "══════════════════════════════════════"
+                echo "Would you like to:"
+                if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
+                    echo "1) Apply suggested USE flag changes to break cycle"
+                fi
+                echo "2) Manage USE flags for affected packages"
+                echo "3) Let emerge handle it automatically (--autounmask-use)"
+                echo "4) Skip packages with circular dependencies"
+                echo "5) Abort installation"
+                echo ""
+                echo -n "Enter your choice (1-5): "
+                local circular_choice
+                read circular_choice
+                
+                case $circular_choice in
+                    1)
+                        if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
+                            _apply_suggested_use_flags "${circular_deps_suggestions[@]}"
+                            continue
+                        else
+                            _pwrfzf_warning "No specific suggestions available"
+                            if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
+                                _manage_use_flags_interactive "${circular_deps_packages[@]}"
+                            fi
+                            continue
+                        fi
+                        ;;
+                    2)
+                        if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
+                            _manage_use_flags_interactive "${circular_deps_packages[@]}"
+                        fi
+                        continue
+                        ;;
+                    3)
+                        _pwrfzf_verbose "Allowing emerge to handle circular dependencies automatically..."
+                        emerge_args=("--autounmask-use" "${emerge_args[@]}")
+                        continue
+                        ;;
+                    4)
+                        _pwrfzf_verbose "Removing packages with circular dependencies..."
+                        for pkg in "${circular_deps_packages[@]}"; do
+                            emerge_args=(${emerge_args[@]//$pkg/})
+                        done
+                        # Remove empty arguments
+                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        continue
+                        ;;
+                    5|*)
+                        _pwrfzf_error "Installation aborted by user"
+                        return 1
+                        ;;
+                esac
+            
+            # Handle other error types similarly...
+            elif [[ ${#masked_packages[@]} -gt 0 ]]; then
+                # [similar immediate handling for masked packages]
+                _pwrfzf_warning "The following packages are masked and cannot be installed:"
+                printf "  - %s\n" "${masked_packages[@]}"
+                echo ""
+                
+                # Immediate options for masked packages
+                echo "══════════════════════════════════════"
+                echo "Would you like to:"
+                echo "1) Unmask the packages (add to package.accept_keywords)"
+                echo "2) Skip installation of masked packages" 
+                echo "3) Retry without changes"
+                echo "4) Abort installation"
+                echo ""
+                echo -n "Enter your choice (1-4): "
+                local choice
+                read choice
+                
+                case $choice in
+                    1)
+                        _unmask_packages "${masked_packages[@]}"
+                        continue
+                        ;;
+                    2)
+                        _pwrfzf_verbose "Removing masked packages and retrying..."
+                        for pkg in "${masked_packages[@]}"; do
+                            emerge_args=(${emerge_args[@]//$pkg/})
+                        done
+                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        continue
+                        ;;
+                    3)
+                        continue
+                        ;;
+                    4|*)
+                        _pwrfzf_error "Installation aborted by user"
+                        return 1
+                        ;;
+                esac
+            
+            elif [[ ${#use_flag_packages[@]} -gt 0 ]]; then
+                # [similar immediate handling for USE flags]
+                _pwrfzf_warning "USE flag changes are required for the following packages:"
+                printf "  - %s\n" "${use_flag_packages[@]}"
+                
+                if [[ ${#use_flag_suggestions[@]} -gt 0 ]]; then
+                    echo ""
+                    echo "Suggested USE flag changes:"
+                    for suggestion in "${use_flag_suggestions[@]}"; do
+                        local pkg="${suggestion%:*}"
+                        local flag="${suggestion#*:}"
+                        echo "  - $pkg: $flag"
+                    done
+                fi
+                echo ""
+                
+                # Immediate options for USE flags
+                echo "══════════════════════════════════════"
+                echo "Would you like to:"
+                echo "1) Manage USE flags for these packages"
+                echo "2) Apply suggested USE flag changes automatically"
+                echo "3) Let emerge handle USE flags automatically (--autounmask-use)"
+                echo "4) Skip packages requiring USE flag changes"
+                echo "5) Abort installation"
+                echo ""
+                echo -n "Enter your choice (1-5): "
+                local use_choice
+                read use_choice
+                
+                case $use_choice in
+                    1)
+                        _manage_use_flags_interactive "${use_flag_packages[@]}"
+                        continue
+                        ;;
+                    2)
+                        _apply_suggested_use_flags "${use_flag_suggestions[@]}"
+                        continue
+                        ;;
+                    3)
+                        emerge_args=("--autounmask-use" "${emerge_args[@]}")
+                        continue
+                        ;;
+                    4)
+                        _pwrfzf_verbose "Removing packages requiring USE flag changes..."
+                        for pkg in "${use_flag_packages[@]}"; do
+                            emerge_args=(${emerge_args[@]//$pkg/})
+                        done
+                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        continue
+                        ;;
+                    5|*)
+                        _pwrfzf_error "Installation aborted by user"
+                        return 1
+                        ;;
+                esac
+            else
+                # Some other error occurred
+                if [[ $retry_count -lt $max_retries ]]; then
+                    _pwrfzf_warning "Installation failed. Retry $retry_count of $max_retries..."
+                    sleep 2
+                else
+                    _pwrfzf_error "Installation failed after $max_retries attempts"
+                    return 1
+                fi
+            fi
+    done
+    
+    _pwrfzf_error "Maximum retry attempts reached"
+    return 1
+}
+
+# Apply suggested USE flag changes automatically
+function _apply_suggested_use_flags() {
+    local suggestions=("$@")
+    
+    _pwrfzf_verbose "Applying suggested USE flag changes..."
+    
+    for suggestion in "${suggestions[@]}"; do
+        local pkg="${suggestion%:*}"
+        local flag="${suggestion#*:}"
+        
+        # Remove the + or - prefix from the flag for package.use format
+        # Also remove any trailing parenthesis or other characters
+        local clean_flag="${flag#[+-]}"
+        clean_flag="${clean_flag%)}"  # Remove trailing parenthesis if present
+        clean_flag="${clean_flag%%[[:space:]]*}"  # Remove any trailing spaces
+        
+        echo "══════════════════════════════════════"
+        echo "Applying USE flag change:"
+        echo "Original package: $pkg"
+        echo "USE flag: $clean_flag"
+        
+        # ALWAYS USE >= FORMAT for versioned packages
+        local package_atom
+        
+        # SIMPLE VERSION DETECTION - check if package contains version numbers
+        if [[ "$pkg" =~ -[0-9] ]]; then
+            # Package has version - ALWAYS use >= format
+            package_atom=">=$pkg"
+            echo "Using: $package_atom (this version and newer)"
+        else
+            # Package without version - use as is
+            package_atom="$pkg"
+            echo "Using package: $package_atom"
+        fi
+        
+        # Select target file
+        echo "Select file to add USE flag:"
+        local config_file
+        config_file=$(_select_config_file "use")
+        config_file=$(echo "$config_file" | grep -E '^/etc/portage/' | head -1)
+        
+        if [[ -z "$config_file" ]] || [[ ! "$config_file" =~ ^/etc/portage/ ]]; then
+            _pwrfzf_error "Invalid file selected for $package_atom"
+            continue
+        fi
+        
+        # Create the USE flag entry with proper format
+        local use_entry="$package_atom $clean_flag"
+        
+        # Confirm addition
+        echo ""
+        echo "══════════════════════════════════════"
+        echo "CONFIRM ADDITION:"
+        echo "Entry: $use_entry"
+        echo "File: $config_file"
+        echo "Note: USE flag '$clean_flag' will be enabled for $package_atom"
+        echo ""
+        echo "Add this entry? (y/N)"
+        read -r confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+            echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
+            
+            # Validate the entry was written correctly
+            if ${PRIV_ESC} grep -q "$package_atom" "$config_file" 2>/dev/null; then
+                _pwrfzf_success "Added to $config_file: $use_entry"
+                
+                # Show what was actually written
+                echo "Written to file: $use_entry"
+            else
+                _pwrfzf_error "Failed to verify entry in $config_file"
+            fi
+        else
+            _pwrfzf_warning "Skipped USE flag change for $pkg"
+        fi
+    done
+}
+
+# Interactive USE flag management for packages
+function _manage_use_flags_interactive() {
+    local packages=("$@")
+    
+    _pwrfzf_verbose "Managing USE flags for packages: ${packages[*]}"
+    
+    for package in "${packages[@]}"; do
+        echo "══════════════════════════════════════"
+        echo "Managing USE flags for: $package"
+        
+        while true; do
+            local action
+            action=$(echo -e "View current USE flags\nAdd USE flags\nRemove USE flags\nView available USE flags\nSkip this package\nDone with this package" | fzf \
+                --bind 'esc:abort' \
+                --header "Manage USE flags for: $package" \
+                --preview-window 'right,60%,border-left' \
+                --border-label-pos=3 \
+                --border 'double' \
+                --border-label="┨${PROG} - USE Flags┠" \
+                --ansi \
+                --color="${pwrfzf_colortheme}" \
+                --preview="bash -c '\"${BASH_SOURCE[0]}\" _use_flags_preview \"$package\" {}'")
+            
+            case "$action" in
+                "View current USE flags")
+                    _view_current_use_flags "$package"
+                    ;;
+                "Add USE flags")
+                    _add_use_flags_interactive "$package"
+                    ;;
+                "Remove USE flags")
+                    _remove_use_flags_interactive "$package"
+                    ;;
+                "View available USE flags")
+                    _view_available_use_flags "$package"
+                    ;;
+                "Skip this package")
+                    _pwrfzf_verbose "Skipping USE flag management for: $package"
+                    break
+                    ;;
+                "Done with this package"|"")
+                    _pwrfzf_verbose "Finished USE flag management for: $package"
+                    break
+                    ;;
+            esac
+        done
+    done
+}
+
+# USE flags preview function
+function _use_flags_preview() {
+    local package="$1"
+    local action="$2"
+    
+    case "$action" in
+        "View current USE flags")
+            echo "=== CURRENT USE FLAGS FOR: $package ==="
+            equery uses "$package" 2>/dev/null || echo "Unable to query USE flags"
+            echo ""
+            echo "=== CURRENT PACKAGE.USE CONFIGURATION ==="
+            grep -r "$package" "/etc/portage/package.use" 2>/dev/null | head -10 || echo "No custom USE configuration"
+            ;;
+        "Add USE flags")
+            echo "=== AVAILABLE USE FLAGS FOR: $package ==="
+            local ebuild_path
+            ebuild_path=$(equery which "$package" 2>/dev/null)
+            if [[ -n "$ebuild_path" ]]; then
+                grep -E "^IUSE=" "$ebuild_path" 2>/dev/null | head -1 | sed 's/IUSE=//' | tr -d '"' | xargs -n1 | sort | column
+            else
+                echo "Unable to find ebuild"
+            fi
+            echo ""
+            echo "=== CURRENT CONFIGURATION ==="
+            grep -r "$package" "/etc/portage/package.use" 2>/dev/null | head -5 || echo "No current configuration"
+            ;;
+        "Remove USE flags")
+            echo "=== CURRENT USE CONFIGURATION ==="
+            grep -r "$package" "/etc/portage/package.use" 2>/dev/null | head -10 || echo "No configuration to remove"
+            ;;
+        "View available USE flags")
+            echo "=== ALL AVAILABLE USE FLAGS FOR: $package ==="
+            local ebuild_path
+            ebuild_path=$(equery which "$package" 2>/dev/null)
+            if [[ -n "$ebuild_path" ]]; then
+                echo "IUSE flags from ebuild:"
+                grep -E "^IUSE=" "$ebuild_path" 2>/dev/null | head -1 | sed 's/IUSE=//' | tr -d '"' | xargs -n1 | sort
+                echo ""
+                echo "Global USE flags (from make.conf):"
+                grep -E "^USE=" /etc/portage/make.conf 2>/dev/null | head -1 | sed 's/USE=//' | tr -d '"' | xargs -n1 | sort | head -20
+            else
+                echo "Unable to find ebuild for $package"
+            fi
+            ;;
+    esac
+}
+
+# Add USE flags interactively
+function _add_use_flags_interactive() {
+    local package="$1"
+    
+    echo "══════════════════════════════════════"
+    echo "Add USE flags for: $package"
+    
+    # Get available USE flags
+    local available_flags=()
+    local ebuild_path
+    ebuild_path=$(equery which "$package" 2>/dev/null)
+    
+    if [[ -n "$ebuild_path" ]]; then
+        available_flags=($(grep -E "^IUSE=" "$ebuild_path" 2>/dev/null | head -1 | sed 's/IUSE=//' | tr -d '"' | xargs -n1 | sort))
+    fi
+    
+    if [[ ${#available_flags[@]} -eq 0 ]]; then
+        _pwrfzf_error "No USE flags found for $package"
+        return 1
+    fi
+    
+    # Let user select USE flags
+    local selected_flags=()
+    while true; do
+        local flag
+        flag=$(printf "%s\n" "${available_flags[@]}" "DONE" | fzf \
+            --prompt "Select USE flag to add (DONE when finished): " \
+            --preview "echo 'Flag: {}'; echo ''; echo 'Description would go here'")
+        
+        if [[ "$flag" == "DONE" ]]; then
+            break
+        elif [[ -n "$flag" ]]; then
+            selected_flags+=("$flag")
+            _pwrfzf_verbose "Selected flag: $flag"
+        fi
+    done
+    
+    if [[ ${#selected_flags[@]} -eq 0 ]]; then
+        _pwrfzf_warning "No USE flags selected"
+        return 1
+    fi
+    
+    # Ask for enable/disable - but store without +/-
+    local use_entry="$package"
+    for flag in "${selected_flags[@]}"; do
+        local action
+        action=$(echo -e "Enable $flag\nDisable $flag" | fzf --prompt "Action for $flag: ")
+        if [[ "$action" == "Enable $flag" ]]; then
+            use_entry+=" $flag"
+        elif [[ "$action" == "Disable $flag" ]]; then
+            use_entry+=" -$flag"
+        fi
+    done
+    
+    # Select target file
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "Select file to add USE flags:"
+    local config_file
+    config_file=$(_select_config_file "use")
+    config_file=$(echo "$config_file" | grep -E '^/etc/portage/' | head -1)
+    
+    if [[ -z "$config_file" ]] || [[ ! "$config_file" =~ ^/etc/portage/ ]]; then
+        _pwrfzf_error "Invalid file selected"
+        return 1
+    fi
+    
+    # Confirm addition
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM ADDITION:"
+    echo "Entry: $use_entry"
+    echo "File: $config_file"
+    echo ""
+    echo "Add this entry? (y/N)"
+    read -r confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+        echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
+        _pwrfzf_success "Added to $config_file: $use_entry"
+        return 0
+    else
+        _pwrfzf_warning "Cancelled"
+        return 1
+    fi
+}
+
+# Helper function to select proper package atom format
+function _select_package_atom_format() {
+    local package="$1"
+    local versions=()
+    
+    # Try to get available versions
+    if command -v eix >/dev/null 2>&1; then
+        versions=($(eix -e "$package" 2>/dev/null | grep -E "^.*\[[UI]\]" | awk '{print $1}' | head -5))
+    fi
+    
+    local options=("$package" "=$package" ">=$package" "<=$package")
+    
+    # Add specific versions if available
+    for version in "${versions[@]}"; do
+        options+=("$version" "=$version")
+    done
+    
+    options+=("Custom entry")
+    
+    local selected
+    selected=$(printf "%s\n" "${options[@]}" | fzf \
+        --prompt "Select package atom format: " \
+        --preview "echo 'Selected: {}'; echo ''; echo 'This will be written to package.use'")
+    
+    if [[ "$selected" == "Custom entry" ]]; then
+        echo ""
+        echo "Enter custom package atom:"
+        read -r custom_atom
+        echo "$custom_atom"
+    else
+        echo "$selected"
+    fi
+}
+
+# View current USE flags
+function _view_current_use_flags() {
+    local package="$1"
+    echo "=== CURRENT USE FLAGS FOR: $package ==="
+    equery uses "$package" 2>/dev/null || echo "Unable to query USE flags"
+    echo ""
+    echo "=== PACKAGE.USE CONFIGURATION ==="
+    grep -r "$package" "/etc/portage/package.use" 2>/dev/null | head -20 || echo "No custom USE configuration"
+    echo ""
+    echo "Press any key to continue..."
+    read -n1 -s
+}
+
+# View available USE flags
+function _view_available_use_flags() {
+    local package="$1"
+    echo "=== AVAILABLE USE FLAGS FOR: $package ==="
+    local ebuild_path
+    ebuild_path=$(equery which "$package" 2>/dev/null)
+    if [[ -n "$ebuild_path" ]]; then
+        echo "IUSE flags from ebuild:"
+        grep -E "^IUSE=" "$ebuild_path" 2>/dev/null | head -1 | sed 's/IUSE=//' | tr -d '"' | xargs -n1 | sort | column
+    else
+        echo "Unable to find ebuild"
+    fi
+    echo ""
+    echo "Press any key to continue..."
+    read -n1 -s
+}
+
+# Remove USE flags interactively
+function _remove_use_flags_interactive() {
+    local package="$1"
+    
+    echo "══════════════════════════════════════"
+    echo "Remove USE flags for: $package"
+    
+    # Get current USE flag configuration
+    local current_config
+    current_config=$(grep -r "$package" "/etc/portage/package.use" 2>/dev/null)
+    
+    if [[ -z "$current_config" ]]; then
+        _pwrfzf_warning "No USE flag configuration found for $package"
+        return 1
+    fi
+    
+    # Let user select which configuration to remove
+    local config_to_remove
+    config_to_remove=$(echo "$current_config" | fzf \
+        --prompt "Select configuration to remove: " \
+        --preview "echo 'Current entry: {}'")
+    
+    if [[ -z "$config_to_remove" ]]; then
+        _pwrfzf_warning "No configuration selected"
+        return 1
+    fi
+    
+    # Extract the file path and line
+    local config_file=$(echo "$config_to_remove" | cut -d: -f1)
+    local config_line=$(echo "$config_to_remove" | cut -d: -f2-)
+    
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM REMOVAL:"
+    echo "Entry: $config_line"
+    echo "File: $config_file"
+    echo ""
+    echo "Remove this entry? (y/N)"
+    read -r confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # Remove the specific line from the file
+        ${PRIV_ESC} sed -i "\|$config_line|d" "$config_file"
+        _pwrfzf_success "Removed from $config_file: $config_line"
+        return 0
+    else
+        _pwrfzf_warning "Cancelled"
+        return 1
+    fi
+}
+
+# Function to unmask packages
+function _unmask_packages() {
+    local packages=("$@")
+    
+    _pwrfzf_verbose "Unmasking packages: ${packages[*]}"
+    
+    for package in "${packages[@]}"; do
+        echo "══════════════════════════════════════"
+        echo "Processing: $package"
+        
+        # Check what kind of masking is preventing installation
+        local mask_info
+        mask_info=$(emerge --pretend "$package" 2>&1 | grep -E "(masked by|keyword)" | head -1)
+        
+        if [[ "$mask_info" =~ keyword ]]; then
+            _pwrfzf_verbose "Package $package is masked by keywords"
+            _add_keyword_entry "$package"
+        elif [[ "$mask_info" =~ masked ]]; then
+            _pwrfzf_verbose "Package $package is hard masked"
+            echo "This package is hard masked and cannot be easily unmasked."
+            echo "You may need to check package.mask files or use package.unmask."
+            echo ""
+            echo "Add to package.unmask? (y/N)"
+            read -r answer
+            if [[ "$answer" =~ ^[Yy]$ ]]; then
+                _add_unmask_entry "$package"
+            fi
+        else
+            _pwrfzf_warning "Unknown masking type for $package"
+        fi
+    done
+}
+
+# Function to add unmask entry
+function _add_unmask_entry() {
+    local package="$1"
+    
+    echo "══════════════════════════════════════"
+    echo "Unmasking package: $package"
+    local new_entry="$package"
+    local config_file
+    
+    # Select target file for package.unmask
+    echo "Select file to add unmask entry:"
+    config_file=$(_select_config_file "unmask")
+    [[ -z "$config_file" ]] && return
+    
+    echo ""
+    echo "══════════════════════════════════════"
+    echo "CONFIRM ADDITION:"
+    echo "Entry: $new_entry"
+    echo "File: $config_file"
+    echo ""
+    echo "Add this entry? (y/N)"
+    read -r answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        # Create directory if needed
+        ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+        echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
+        _pwrfzf_success "Added to $config_file: $new_entry"
+    fi
+}
+
+# Main function
+function main() {
+    local ARGS=() emerge_args=() SearchInput
+    
+    # Handle command line options
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                _pwrfzf_help
+                exit 0
+                ;;
+            --help-full)
+                _pwrfzf_help_full
+                exit 0
+                ;;
+            -k|--keybindings)
+                _pwrfzf_keys
+                exit 0
+                ;;
+            -V|--version)
+                _pwrfzf_version
+                exit 0
+                ;;
+            -c|--config)
+                _portage_config_manager
+                exit 0
+                ;;
+            --sync)
+                _sync_repositories
+                exit 0
+                ;;
+            --preserved-rebuild)
+                _preserved_rebuild
+                exit 0
+                ;;
+            __fzf_preview)
+                __fzf_preview "$2"
+                exit 0
+                ;;
+            -*)
+                emerge_args+=("$1")
+                ;;
+            *)
+                ARGS+=("$1")
+                ;;
+        esac
+        shift
+    done
+    
+    # Set default emerge args if none provided
+    [[ ${#emerge_args[@]} -eq 0 ]] && emerge_args=("--ask")
+    SearchInput="${ARGS[*]}"
+    
+    # Main package management loop
+    while true; do
+        local PICKS=()
+        __emerge_list "$SearchInput" | fzf \
+            --bind "ctrl-r:execute:${EMERGE_CMD} -aC \$(echo {1} | cut -d':' -f1)" \
+            --bind "ctrl-w:execute:${PRIV_ESC} emaint sync -a && ${EMERGE_CMD} -avuDN @world" \
+            --bind "ctrl-z:execute:${EMERGE_CMD} -1 @preserved-rebuild" \
+            --bind "ctrl-s:execute:${PRIV_ESC} emaint sync -a" \
+            --bind "ctrl-o:execute:${BASH_SOURCE[0]} -c" \
+            --bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
+            --bind 'ctrl-l:clear-query+clear-screen+clear-selection' \
+            --bind 'alt-bspace:clear-query' \
+            --bind 'alt-left:kill-word' \
+            --bind "esc:abort" \
+            --bind 'ctrl-q:abort' \
+            --bind 'ctrl-d:deselect-all' \
+            --bind 'ctrl-i:select-all' \
+            --bind 'ctrl-v:toggle-preview' \
+            --bind 'ctrl-n:next-history' \
+            --bind 'ctrl-b:previous-history' \
+            --bind 'right:first' \
+            --bind 'left:last' \
+            --bind 'end:first' \
+            --bind 'home:last' \
+            --bind 'pgdn:page-down' \
+            --bind 'pgup:page-up' \
+            --bind 'shift-tab:deselect' \
+            --bind 'tab:select' \
+            --bind "?:preview(echo '$(_pwrfzf_keys)')" \
+            --bind "change:first" \
+            --header 'Press ? for keybindings | Ctrl+o: Config | Ctrl+s: Sync | Ctrl+z: Preserved' \
+            --header-lines=1 \
+            --preview-window "$PWRFZF_PREVIEW_WINDOW" \
+            --history="$PWRFZF_HISTORY" \
+            --query="${SearchInput}" \
+            --preview-label-pos=top \
+            --border-label-pos=3 \
+            --border 'double' \
+            --preview-label="╣${SearchInput:-pwrfzf}╠" \
+            --border-label="┨${PROG}┠" \
+            --info=inline \
+            --scroll-off=20 \
+            --hscroll-off=30 \
+            --ellipsis="⣿" \
+            --tiebreak=begin \
+            --sync \
+            --multi \
+            --delimiter ' ' \
+            --ansi \
+            --color="${pwrfzf_colortheme}" \
+            --preview="bash -c '\"${BASH_SOURCE[0]}\" __fzf_preview {1}'" | while read -r line; do
+                PICKS+=("$line")
+            done
+        
+        if [[ ${#PICKS[@]} -eq 0 ]]; then
+            exit 0
+        fi
+        
+        declare -a PKGS
+        for PICK in "${PICKS[@]}"; do
+            if [[ "$PICK" =~ ^([^:]+) ]]; then
+                PKGS+=("${BASH_REMATCH[1]}")
+            fi
+        done
+        
+        if [[ ${PWRFZF_CONFIRM_ACTIONS} == "true" ]]; then
+            echo "══════════════════════════════════════"
+            echo "CONFIRM INSTALLATION:"
+            echo "Selected packages: ${PKGS[*]}"
+            echo "Execute: ${EMERGE_CMD} ${emerge_args[*]} ${PKGS[*]}"
+            echo ""
+            echo "Proceed with installation? (y/N)"
+            read -r answer
+            if [[ "$answer" =~ ^[Yy]$ ]]; then
+                _install_packages_with_fallback "${emerge_args[@]}" "${PKGS[@]}"
+            else
+                _pwrfzf_warning "Installation cancelled"
+            fi
+        else
+            _install_packages_with_fallback "${emerge_args[@]}" "${PKGS[@]}"
+        fi
+    done
+}
+
+# Main script execution
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Handle subcommands first
+    case "${1:-}" in
+        _config_preview)
+            _config_preview "$2"
+            exit 0
+            ;;
+        _action_preview)
+            _action_preview "$2" "$3"
+            exit 0
+            ;;
+        _sets_action_preview)
+            _sets_action_preview "$2"
+            exit 0
+            ;;
+        __fzf_preview)
+            __fzf_preview "$2"
+            exit 0
+            ;;
+    esac
+
+    # Only initialize and run main if we're the main script execution
+    _pwrfzf_init
+    main "$@"
+fi
