@@ -59,6 +59,7 @@ function _pwrfzf_init() {
     _check_dependencies
     _create_directories
     _load_config
+    _validate_config
     _setup_logging
     _set_colors
     _set_fx
@@ -70,49 +71,18 @@ function _pwrfzf_init() {
 # Setup logging based on configuration
 function _setup_logging() {
     if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
-        # Create log file and set up logging
         local log_file="${PWRFZF_CONFIG_DIR}/pwrfzf.log"
-        touch "$log_file" 2>/dev/null || {
-            _pwrfzf_warning "Cannot create log file: $log_file"
-            return
+        # Create log directory if it doesn't exist
+        mkdir -p "$(dirname "$log_file")"
+        
+        # Function to strip ANSI color codes
+        function _strip_ansi() {
+            sed -E 's/\x1B\[[0-9;]*[mGK]//g'
         }
         
-        # Log startup
-        {
-            echo "=== PWRFZF Started $(date) ==="
-            echo "Version: $PWRFZF_VERSION"
-            echo "User: $(whoami)"
-            echo "Arguments: $*"
-            echo "=== ==="
-        } >> "$log_file"
-        
-        # Function to log messages
-        _pwrfzf_log() {
-            if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$log_file"
-            fi
-        }
-        
-        # Redirect verbose messages to log
-        function _pwrfzf_verbose() {
-            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@"
-            _pwrfzf_log "VERBOSE: $*"
-        }
-        
-        function _pwrfzf_error() {
-            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
-            _pwrfzf_log "ERROR: $*"
-        }
-        
-        function _pwrfzf_warning() {
-            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Yellow]}${pwrfzf_color[Black]} WARNING ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Yellow]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
-            _pwrfzf_log "WARNING: $*"
-        }
-        
-        function _pwrfzf_success() {
-            printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Green]}${pwrfzf_color[Black]} SUCCESS ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Green]}%s${pwrfzf_color[Reset]}\n" "$@"
-            _pwrfzf_log "SUCCESS: $*"
-        }
+        # Redirect stdout and stderr to log file with ANSI stripping
+        exec > >(tee >(_strip_ansi >> "$log_file"))
+        exec 2> >(tee >(_strip_ansi >> "$log_file") >&2)
         
         _pwrfzf_verbose "Logging enabled: $log_file"
     fi
@@ -132,23 +102,6 @@ function _check_dependencies() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         _pwrfzf_error "Missing dependencies: ${missing[*]}"
         _pwrfzf_warning "Install with: emerge --ask ${missing[*]}"
-        exit 1
-    fi
-}
-
-# Find privilege escalator (sudo/doas)
-function _find_privilege_escalator() {
-    if [[ $EUID -eq 0 ]]; then
-        PRIV_ESC=""
-        return
-    fi
-    
-    if command -v sudo >/dev/null 2>&1; then
-        PRIV_ESC="sudo"
-    elif command -v doas >/dev/null 2>&1; then
-        PRIV_ESC="doas"
-    else
-        _pwrfzf_error "Neither sudo nor doas found. Install one or run as root."
         exit 1
     fi
 }
@@ -181,6 +134,26 @@ function _load_config() {
     fi
 }
 
+# Validate configuration after loading
+function _validate_config() {
+    # Validate PRIV_ESC if set
+    if [[ -n "$PRIV_ESC" ]]; then
+        if [[ "$PRIV_ESC" != "sudo" && "$PRIV_ESC" != "doas" && "$PRIV_ESC" != "" ]]; then
+            _pwrfzf_warning "Invalid PRIV_ESC value: '$PRIV_ESC'. Using auto-detection."
+            unset PRIV_ESC
+        elif [[ -n "$PRIV_ESC" ]] && ! command -v "$PRIV_ESC" >/dev/null 2>&1; then
+            _pwrfzf_warning "Configured PRIV_ESC '$PRIV_ESC' not found in PATH. Using auto-detection."
+            unset PRIV_ESC
+        fi
+    fi
+    
+    # Validate logging
+    if [[ "$PWRFZF_LOGGING" != "true" && "$PWRFZF_LOGGING" != "false" ]]; then
+        _pwrfzf_warning "Invalid PWRFZF_LOGGING value: '$PWRFZF_LOGGING'. Using default: false"
+        PWRFZF_LOGGING="false"
+    fi
+}
+
 # Create default configuration file
 function _create_default_config() {
     cat > "$PWRFZF_CONFIG_FILE" << 'EOF'
@@ -194,15 +167,52 @@ PWRFZF_SHOW_INSTALLED=true
 PWRFZF_AUTO_SYNC=false
 PWRFZF_CONFIRM_ACTIONS=true
 PWRFZF_MAX_PREVIEW_LINES=50
-PWRFZF_LOGGING=true
+PWRFZF_LOGGING=false
 
 # Layout
 PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
 
 # Emerge options
 EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
+
+# Privilege escalation (sudo/doas/empty for root)
+# PRIV_ESC="sudo"
+# PRIV_ESC="doas"
+# PRIV_ESC=""  # for root
+
+# Additional environment variables
+# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose --quiet-build=y"
+# export NO_COLOR=false
 EOF
     _pwrfzf_verbose "Created default configuration: $PWRFZF_CONFIG_FILE"
+}
+
+# Find privilege escalator (sudo/doas)
+function _find_privilege_escalator() {
+    # Check if PRIV_ESC is already set in config
+    if [[ -n "$PRIV_ESC" ]]; then
+        _pwrfzf_verbose "Using configured privilege escalator: $PRIV_ESC"
+        return
+    fi
+    
+    if [[ $EUID -eq 0 ]]; then
+        PRIV_ESC=""
+        _pwrfzf_verbose "Running as root, no privilege escalation needed"
+        return
+    fi
+    
+    # Auto-detect if not configured
+    if command -v sudo >/dev/null 2>&1; then
+        PRIV_ESC="sudo"
+        _pwrfzf_verbose "Auto-detected sudo as privilege escalator"
+    elif command -v doas >/dev/null 2>&1; then
+        PRIV_ESC="doas"
+        _pwrfzf_verbose "Auto-detected doas as privilege escalator"
+    else
+        _pwrfzf_error "Neither sudo nor doas found. Install one or run as root."
+        _pwrfzf_error "You can set PRIV_ESC in $PWRFZF_CONFIG_FILE"
+        exit 1
+    fi
 }
 
 # Set color theme and color definitions
@@ -1511,318 +1521,203 @@ function _preserved_rebuild() {
     fi
 }
 
-# Enhanced package installation with automatic unmasking for both keywords and USE flags
+# Enhanced package installation - try direct install first, analyze on failure
 function _install_packages_with_fallback() {
     local emerge_args=("$@")
     local max_retries=3
     local retry_count=0
     
-    # Separate pretend args (without --ask) and real args (with --ask)
-    local pretend_args=()
-    local real_args=()
-    
-    for arg in "${emerge_args[@]}"; do
-        if [[ "$arg" != "--ask" ]]; then
-            pretend_args+=("$arg")
-        fi
-        real_args+=("$arg")
-    done
-    
     while [[ $retry_count -lt $max_retries ]]; do
-        # Show what would be merged - full output like normal emerge
         echo "══════════════════════════════════════"
-        echo "Calculating dependencies..."
+        echo "Attempt $((retry_count + 1)) of $max_retries"
+        echo "Installing: ${emerge_args[*]}"
         
-        # Run emerge --pretend without --ask and capture output
-        echo ">>> These are the packages that would be merged, in order:"
-        local pretend_output
-        pretend_output=$(${EMERGE_CMD} --pretend "${pretend_args[@]}" 2>&1)
-        local pretend_exit_code=$?
+        # Try direct installation first
+        echo ">>> Running direct installation..."
+        ${EMERGE_CMD} "${emerge_args[@]}"
+        local emerge_exit_code=$?
         
-        # Show the pretend output regardless of exit code
-        echo "$pretend_output"
-        
-        # If pretend failed, we need to analyze the error
-        if [[ $pretend_exit_code -ne 0 ]]; then
+        if [[ $emerge_exit_code -eq 0 ]]; then
+            echo "✅ Package installation completed successfully"
+            return 0
+        elif [[ $emerge_exit_code -eq 130 ]]; then
+            # Exit code 130 (SIGINT) means user cancelled with Ctrl+C
+            echo "⏹️ Installation cancelled by user"
+            return 130
+        else
+            ((retry_count++))
+            echo "❌ Installation failed (attempt $retry_count). Analyzing issues..."
+            
+            # Now run --pretend to analyze what went wrong
+            local pretend_output
+            pretend_output=$(${EMERGE_CMD} --pretend "${emerge_args[@]}" 2>&1)
+            local pretend_exit_code=$?
+            
             echo ""
-            echo "❌ Dependency calculation encountered issues"
+            echo "══════════════════════════════════════"
+            echo "DEPENDENCY ANALYSIS:"
+            echo "$pretend_output"
             
-            # ANALYSIS - check for common issues in the pretend output
-            local masked_packages=()
-            local use_flag_packages=()
-            local use_flag_suggestions=()
-            local circular_deps_packages=()
-            local circular_deps_suggestions=()
+            if [[ $pretend_exit_code -ne 0 ]]; then
+                # Analyze the failure - IMPROVED DETECTION
+                local masked_packages=()
+                local use_flag_packages=()
+                local use_flag_suggestions=()
+                local circular_deps_packages=()
+                local circular_deps_suggestions=()
+                local keyword_packages=()
 
-            # Check for circular dependencies in pretend output
-            if echo "$pretend_output" | grep -q "circular dependencies"; then
-                # Single pass to extract both package and flag
-                local fix_line
-                fix_line=$(echo "$pretend_output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
+                # IMPROVED: Check for masked packages (both keyword and hard masked)
+                if echo "$pretend_output" | grep -q "masked"; then
+                    # Extract package names from masked messages
+                    masked_packages=($(echo "$pretend_output" | grep -E "!!!.*masked" | \
+                        sed -E 's/.*"([^"]+)".*/\1/' | sort -u))
+                fi
                 
-                if [[ "$fix_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][a-zA-Z0-9_-]+) ]]; then
-                    local pkg="${BASH_REMATCH[1]}"
-                    local flag="${BASH_REMATCH[2]}"
-                    local clean_display_flag="${flag#[+-]%)}"  # Remove +- prefix and ) suffix
+                # IMPROVED: Check specifically for keyword masking
+                if echo "$pretend_output" | grep -q "keyword.*masked"; then
+                    keyword_packages=($(echo "$pretend_output" | grep -E "!!!.*keyword.*masked" | \
+                        sed -E 's/.*"([^"]+)".*/\1/' | sort -u))
+                fi
+
+                # Check for circular dependencies
+                if echo "$pretend_output" | grep -q "circular dependencies"; then
+                    local fix_line
+                    fix_line=$(echo "$pretend_output" | grep -A2 "It might be possible to break this cycle" | grep "Change USE:" | head -1)
                     
-                    circular_deps_packages=("$pkg")
-                    circular_deps_suggestions=("$pkg:$flag")
-                    circular_deps_display=("$pkg:$clean_display_flag")
+                    if [[ "$fix_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][a-zA-Z0-9_-]+) ]]; then
+                        local pkg="${BASH_REMATCH[1]}"
+                        local flag="${BASH_REMATCH[2]}"
+                        circular_deps_packages=("$pkg")
+                        circular_deps_suggestions=("$pkg:$flag")
+                    fi
                 fi
-            fi
-            
-            # Check for USE flag requirements in pretend output
-            local use_line=$(echo "$pretend_output" | grep "Change USE:" | head -1)
-            if [[ -n "$use_line" ]]; then
-                if [[ "$use_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][^[:space:]]+) ]]; then
-                    local pkg="${BASH_REMATCH[1]}"
-                    local flag="${BASH_REMATCH[2]}"
-                    # ALWAYS use the versioned package as-is for >= format
-                    use_flag_packages+=("$pkg")
-                    use_flag_suggestions+=("$pkg:$flag")
+                
+                # Check for USE flag requirements
+                local use_line=$(echo "$pretend_output" | grep "Change USE:" | head -1)
+                if [[ -n "$use_line" ]]; then
+                    if [[ "$use_line" =~ -\ ([^[:space:]]+).*Change\ USE:\ ([+-][^[:space:]]+) ]]; then
+                        local pkg="${BASH_REMATCH[1]}"
+                        local flag="${BASH_REMATCH[2]}"
+                        use_flag_packages+=("$pkg")
+                        use_flag_suggestions+=("$pkg:$flag")
+                    fi
                 fi
-            fi
 
-            # Check for masked packages in pretend output
-            if echo "$pretend_output" | grep -q "masked"; then
-                masked_packages=($(echo "$pretend_output" | grep -oE '!!!.*"([^"]+)".*masked' | head -3 | sed -E 's/!!!"([^"]+)".*/\1/'))
-            fi
-            
-            # SHOW OPTIONS BASED ON ANALYSIS
-            if [[ ${#circular_deps_packages[@]} -gt 0 ]] || [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
+                # SHOW INTERACTIVE OPTIONS BASED ON ANALYSIS
                 echo ""
-                echo "🔄 Circular dependencies detected!"
+                echo "══════════════════════════════════════"
+                echo "🛠️  CONFIGURATION ISSUES DETECTED"
+                
+                local options=()
+                local option_descriptions=()
+                
+                if [[ ${#masked_packages[@]} -gt 0 ]]; then
+                    options+=("1")
+                    option_descriptions+=("Unmask packages: ${masked_packages[*]}")
+                fi
+                
+                if [[ ${#keyword_packages[@]} -gt 0 ]]; then
+                    options+=("2") 
+                    option_descriptions+=("Add keywords for: ${keyword_packages[*]}")
+                fi
+                
+                if [[ ${#use_flag_packages[@]} -gt 0 ]]; then
+                    options+=("3")
+                    option_descriptions+=("Manage USE flags for: ${use_flag_packages[*]}")
+                fi
+                
                 if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
-                    echo "Affected packages:"
-                    printf "  - %s\n" "${circular_deps_packages[@]}"
+                    options+=("4")
+                    option_descriptions+=("Fix circular dependencies: ${circular_deps_packages[*]}")
                 fi
-
-                if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
-                    echo ""
-                    echo "Suggested fixes to break the cycle:"
-                    for suggestion in "${circular_deps_suggestions[@]}"; do
-                        local pkg="${suggestion%:*}"
-                        local flag="${suggestion#*:}"
-                        # Clean the flag for display - remove + prefix and ) suffix
-                        local clean_flag="${flag#[+-]}"
-                        clean_flag="${clean_flag%)}"
-                        echo "  - $pkg: Enable USE flag '$clean_flag'"                        
-                    done
-                fi
-
-                # Offer to fix circular dependencies
-                echo "══════════════════════════════════════"
-                echo "Would you like to:"
-                if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
-                    echo "1) Apply suggested USE flag changes to break cycle"
-                fi
-                echo "2) Manage USE flags for affected packages"
-                echo "3) Let emerge handle it automatically (--autounmask-use)"
-                echo "4) Skip packages with circular dependencies"
-                echo "5) Abort installation"
-                echo ""
-                echo -n "Enter your choice (1-5): "
-                local circular_choice
-                read circular_choice
                 
-                case $circular_choice in
-                    1)
-                        if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
-                            _apply_suggested_use_flags "${circular_deps_suggestions[@]}"
-                            # RETURN TO MAIN LOOP TO RESTART COMPLETELY
-                            echo "🔄 Configuration updated. Returning to main menu to restart installation..."
-                            return 2  # Special return code to indicate config was changed
-                        else
-                            echo "⚠️ No specific suggestions available"
-                            if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
-                                _manage_use_flags_interactive "${circular_deps_packages[@]}"
-                                # Update both pretend and real args for consistency
-                                pretend_args=("${real_args[@]}")
-                                echo "🔄 Configuration updated. Returning to main menu to restart installation..."
-                                return 2  # Special return code to indicate config was changed
-                            fi
-                        fi
-                        ;;
-                    2)
-                        if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
-                            _manage_use_flags_interactive "${circular_deps_packages[@]}"
-                            # Update both pretend and real args for consistency
-                            pretend_args=("${real_args[@]}")
-                            echo "🔄 Configuration updated. Returning to main menu to restart installation..."
-                            return 2  # Special return code to indicate config was changed
-                        fi
-                        ;;
-                    3)
-                        echo "🔧 Allowing emerge to handle circular dependencies automatically..."
-                        real_args=("--autounmask-use" "${real_args[@]}")
-                        pretend_args=("--autounmask-use" "${pretend_args[@]}")
-                        continue
-                        ;;
-                    4)
-                        echo "⏭️ Removing packages with circular dependencies..."
-                        for pkg in "${circular_deps_packages[@]}"; do
-                            real_args=(${real_args[@]//$pkg/})
-                            pretend_args=(${pretend_args[@]//$pkg/})
-                        done
-                        # Remove empty arguments
-                        real_args=($(printf '%s\n' "${real_args[@]}" | grep -v '^$'))
-                        pretend_args=($(printf '%s\n' "${pretend_args[@]}" | grep -v '^$'))
-                        echo "🔄 Retrying without problematic packages..."
-                        retry_count=0  # Reset retry counter
-                        continue
-                        ;;
-                    5|*)
-                        echo "❌ Installation aborted by user"
-                        return 1
-                        ;;
-                esac
-            
-            elif [[ ${#masked_packages[@]} -gt 0 ]]; then
-                echo ""
-                echo "🚫 The following packages are masked and cannot be installed:"
-                printf "  - %s\n" "${masked_packages[@]}"
-                echo ""
+                options+=("5" "6" "7")
+                option_descriptions+=("Open Portage config manager (all files)" "Let emerge handle automatically (--autounmask-use)")
+                option_descriptions+=("Skip problematic packages and retry")
+
+                # Display options
+                for i in "${!options[@]}"; do
+                    echo "${options[i]}) ${option_descriptions[i]}"
+                done
+                echo "0) Abort installation"
                 
-                echo "══════════════════════════════════════"
-                echo "Would you like to:"
-                echo "1) Unmask the packages (add to package.accept_keywords)"
-                echo "2) Skip installation of masked packages" 
-                echo "3) Retry without changes"
-                echo "4) Abort installation"
                 echo ""
-                echo -n "Enter your choice (1-4): "
-                local choice
-                read choice
+                echo -n "Select action: "
+                read -r choice
                 
                 case $choice in
                     1)
-                        _unmask_packages "${masked_packages[@]}"
-                        # Update both pretend and real args for consistency
-                        pretend_args=("${real_args[@]}")
-                        echo "🔄 Configuration updated. Returning to main menu to restart installation..."
-                        return 2  # Special return code to indicate config was changed
+                        if [[ ${#masked_packages[@]} -gt 0 ]]; then
+                            _unmask_packages "${masked_packages[@]}"
+                            echo "🔄 Configuration updated. Retrying..."
+                            # Continue to next iteration (retry)
+                            continue
+                        fi
                         ;;
                     2)
-                        echo "⏭️ Removing masked packages and retrying..."
-                        for pkg in "${masked_packages[@]}"; do
-                            real_args=(${real_args[@]//$pkg/})
-                            pretend_args=(${pretend_args[@]//$pkg/})
-                        done
-                        # Remove empty arguments
-                        real_args=($(printf '%s\n' "${real_args[@]}" | grep -v '^$'))
-                        pretend_args=($(printf '%s\n' "${pretend_args[@]}" | grep -v '^$'))
-                        echo "🔄 Retrying without masked packages..."
-                        retry_count=0  # Reset retry counter
-                        continue
+                        if [[ ${#keyword_packages[@]} -gt 0 ]]; then
+                            for pkg in "${keyword_packages[@]}"; do
+                                _add_keyword_entry "$pkg"
+                            done
+                            echo "🔄 Configuration updated. Retrying..."
+                            continue
+                        fi
                         ;;
                     3)
-                        continue
-                        ;;
-                    4|*)
-                        echo "❌ Installation aborted by user"
-                        return 1
-                        ;;
-                esac
-            
-            elif [[ ${#use_flag_packages[@]} -gt 0 ]]; then
-                echo ""
-                echo "⚙️ USE flag changes are required for the following packages:"
-                printf "  - %s\n" "${use_flag_packages[@]}"
-                
-                if [[ ${#use_flag_suggestions[@]} -gt 0 ]]; then
-                    echo ""
-                    echo "Suggested USE flag changes:"
-                    for suggestion in "${use_flag_suggestions[@]}"; do
-                        local pkg="${suggestion%:*}"
-                        local flag="${suggestion#*:}"
-                        echo "  - $pkg: $flag"
-                    done
-                fi
-                echo ""
-                
-                echo "══════════════════════════════════════"
-                echo "Would you like to:"
-                echo "1) Manage USE flags for these packages"
-                echo "2) Apply suggested USE flag changes automatically"
-                echo "3) Let emerge handle USE flags automatically (--autounmask-use)"
-                echo "4) Skip packages requiring USE flag changes"
-                echo "5) Abort installation"
-                echo ""
-                echo -n "Enter your choice (1-5): "
-                local use_choice
-                read use_choice
-                
-                case $use_choice in
-                    1)
-                        _manage_use_flags_interactive "${use_flag_packages[@]}"
-                        # Update both pretend and real args for consistency
-                        pretend_args=("${real_args[@]}")
-                        echo "🔄 Configuration updated. Returning to main menu to restart installation..."
-                        return 2  # Special return code to indicate config was changed
-                        ;;
-                    2)
-                        _apply_suggested_use_flags "${use_flag_suggestions[@]}"
-                        # Update both pretend and real args for consistency
-                        pretend_args=("${real_args[@]}")
-                        echo "🔄 Configuration updated. Returning to main menu to restart installation..."
-                        return 2  # Special return code to indicate config was changed
-                        ;;
-                    3)
-                        real_args=("--autounmask-use" "${real_args[@]}")
-                        pretend_args=("--autounmask-use" "${pretend_args[@]}")
-                        continue
+                        if [[ ${#use_flag_packages[@]} -gt 0 ]]; then
+                            _manage_use_flags_interactive "${use_flag_packages[@]}"
+                            echo "🔄 Configuration updated. Retrying..."
+                            continue
+                        fi
                         ;;
                     4)
-                        echo "⏭️ Removing packages requiring USE flag changes..."
-                        for pkg in "${use_flag_packages[@]}"; do
-                            real_args=(${real_args[@]//$pkg/})
-                            pretend_args=(${pretend_args[@]//$pkg/})
-                        done
-                        # Remove empty arguments
-                        real_args=($(printf '%s\n' "${real_args[@]}" | grep -v '^$'))
-                        pretend_args=($(printf '%s\n' "${pretend_args[@]}" | grep -v '^$'))
-                        echo "🔄 Retrying without problematic packages..."
-                        retry_count=0  # Reset retry counter
+                        if [[ ${#circular_deps_packages[@]} -gt 0 ]]; then
+                            if [[ ${#circular_deps_suggestions[@]} -gt 0 ]]; then
+                                _apply_suggested_use_flags "${circular_deps_suggestions[@]}"
+                            else
+                                _manage_use_flags_interactive "${circular_deps_packages[@]}"
+                            fi
+                            echo "🔄 Configuration updated. Retrying..."
+                            continue
+                        fi
+                        ;;
+                    5)
+                        # Open Portage config manager for manual editing
+                        _portage_config_manager
+                        echo "🔄 Configuration updated. Retrying..."
                         continue
                         ;;
-                    5|*)
+                    6)
+                        echo "🔧 Allowing emerge to handle automatically..."
+                        emerge_args=("--autounmask-use" "${emerge_args[@]}")
+                        echo "🔄 Retrying with automatic unmasking..."
+                        continue
+                        ;;
+                    7)
+                        echo "⏭️ Skipping problematic packages..."
+                        local all_problem_packages=("${masked_packages[@]}" "${keyword_packages[@]}" "${use_flag_packages[@]}" "${circular_deps_packages[@]}")
+                        for pkg in "${all_problem_packages[@]}"; do
+                            emerge_args=(${emerge_args[@]//$pkg/})
+                        done
+                        # Remove empty arguments
+                        emerge_args=($(printf '%s\n' "${emerge_args[@]}" | grep -v '^$'))
+                        echo "🔄 Retrying without problematic packages..."
+                        continue
+                        ;;
+                    0|*)
                         echo "❌ Installation aborted by user"
                         return 1
                         ;;
                 esac
             else
-                echo "❌ Unknown dependency issue. Aborting installation."
-                return 1
-            fi
-        else
-            # Pretend succeeded, proceed with actual installation
-            echo ""
-            echo "Attempt $((retry_count + 1)) of $max_retries"
-            echo "══════════════════════════════════════"
-            echo "Proceeding with actual installation..."
-            echo ""
-
-            # Try to install packages with --ask for confirmation
-            ${EMERGE_CMD} "${real_args[@]}"
-            local emerge_exit_code=$?
-            
-            if [[ $emerge_exit_code -eq 0 ]]; then
-                echo "✅ Package installation completed successfully"
-                return 0
-            elif [[ $emerge_exit_code -eq 130 ]] || [[ $emerge_exit_code -eq 1 ]]; then
-                # Exit code 130 (SIGINT) or 1 typically means user cancelled
-                echo "⏹️ Installation cancelled by user"
-                return 130  # Special return code for user cancellation
-            else
-                ((retry_count++))
+                # Pretend passed but actual install failed - unknown error
+                echo "❌ Unknown installation error. Pretend passed but install failed."
                 if [[ $retry_count -lt $max_retries ]]; then
-                    echo "⚠️ Installation failed. Retry $retry_count of $max_retries..."
-                    sleep 2
-                else
-                    echo "❌ Installation failed after $max_retries attempts"
-                    return 1
+                    echo "🔄 Retrying..."
+                    continue
                 fi
-            fi            
+            fi
         fi
     done
     
@@ -2274,6 +2169,15 @@ function _add_unmask_entry() {
 # Main function
 function main() {
     local ARGS=() emerge_args=() SearchInput
+    
+    # Apply EMERGE_DEFAULT_OPTS from config if set
+    if [[ -n "$EMERGE_DEFAULT_OPTS" ]]; then
+        _pwrfzf_verbose "Using EMERGE_DEFAULT_OPTS: $EMERGE_DEFAULT_OPTS"
+        # Convert the space-separated options to an array
+        IFS=' ' read -r -a default_opts_array <<< "$EMERGE_DEFAULT_OPTS"
+        emerge_args+=("${default_opts_array[@]}")
+    fi
+    
     while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
@@ -2319,7 +2223,10 @@ function main() {
     done
     
     # Set default emerge args if none provided
-    [[ ${#emerge_args[@]} -eq 0 ]] && emerge_args=("--ask")
+    if [[ ${#emerge_args[@]} -eq 0 ]]; then
+        emerge_args=("--ask")
+    fi
+    
     SearchInput="${ARGS[*]}"
     
     # Store selected packages for automatic retry
