@@ -16,7 +16,8 @@
 - **📊 Real-time Preview** - Package info, USE flags, installed files, and config status
 - **🔄 Auto-Retry System** - Automatic retry with USE flag and keyword fixes
 - **🗑️ File Management** - Create, edit, and delete configuration files safely
-- **📝 Logging System** - Comprehensive logging for troubleshooting
+- **📝 Intelligent** logging system
+- **🔧 Smart package** installation with fallback analysis
 
 ## 📸 Screenshots
 
@@ -181,8 +182,37 @@ Access the comprehensive Portage config manager with `Ctrl-o` or `pwrfzf -c`:
 - Configuration changes
 - Error details and recovery attempts
 
-## 🤝 Contributing
+## Sample config 
+```
+# PWRFZF Configuration File
+# Colors and display
+NO_COLOR=false
+NO_FX=false
 
+# Behavior
+PWRFZF_SHOW_INSTALLED=true
+PWRFZF_AUTO_SYNC=false
+PWRFZF_CONFIRM_ACTIONS=true
+PWRFZF_MAX_PREVIEW_LINES=50
+PWRFZF_LOGGING=true
+
+# Layout
+PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
+
+# Emerge options
+EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
+
+# Privilege escalation (sudo/doas/empty for root)
+PRIV_ESC="sudo"
+# PRIV_ESC="doas"
+# PRIV_ESC=""  # for root
+
+# Additional environment variables
+# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose --quiet-build=y"
+# export NO_COLOR=false
+```
+
+## 🤝 Contributing
 Contributions are welcome! Please feel free to:
 - Fork the repository
 - Create a feature branch
