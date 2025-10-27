@@ -1,3 +1,58 @@
+# ⚠️ DISCLAIMER: USE AT YOUR OWN RISK
+
+## IMPORTANT WARNING
+
+**PWRFZF is a powerful but potentially dangerous tool. Improper use can damage your Gentoo system.**
+
+### 🚨 CRITICAL WARNINGS
+
+- **SYSTEM INSTABILITY**: This tool can make significant changes to your system configuration
+- **PACKAGE CONFLICTS**: Automated dependency resolution may sometimes break your system
+- **CONFIGURATION CHANGES**: Modifies Portage configuration files automatically
+- **NO WARRANTY**: This software is provided "as-is" without any guarantees
+- **DATA LOSS**: In extreme cases, system damage could lead to data loss
+
+### 🔧 TECHNICAL RISKS
+
+- **Automated unmasking** of packages without manual review
+- **USE flag changes** that may break dependencies
+- **Keyword additions** that could introduce unstable software
+- **Configuration file modifications** that may conflict with manual settings
+- **Dependency resolution** that might not always be optimal
+
+### ✅ SAFETY PRECAUTIONS
+
+**BEFORE USING PWRFZF:**
+- [ ] Backup important data
+- [ ] Create a system snapshot (if using Btrfs/ZFS)
+- [ ] Understand Gentoo package management basics
+- [ ] Review changes before confirming installation
+- [ ] Keep regular backups of `/etc/portage/`
+
+### 🛡️ RECOMMENDED FOR
+
+- **Experienced Gentoo users** who understand the risks
+- **Users comfortable with** Portage configuration
+- **Those who regularly backup** their systems
+- **Developers testing** in controlled environments
+
+### ❌ NOT RECOMMENDED FOR
+
+- **Gentoo beginners** without mentorship
+- **Production systems** without proper backups
+- **Users unfamiliar with** emerge and Portage
+- **Critical systems** where downtime is unacceptable
+
+### 📝 LEGAL DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+**By using PWRFZF, you acknowledge that you understand these risks and accept full responsibility for any consequences to your system.**
+
+*Last updated: $(date +%Y-%m-%d)*
+
 # PWRFZF - Powerful Gentoo Package Manager with FZF
 
 > **A comprehensive interactive package and repository management tool for Gentoo Linux**
