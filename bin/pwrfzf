@@ -65,6 +65,7 @@ function _pwrfzf_init() {
     _set_fx
     _find_privilege_escalator
     _find_emerge
+    _load_emerge_default_opts
     _load_layout
 }
 
@@ -169,20 +170,19 @@ PWRFZF_CONFIRM_ACTIONS=true
 PWRFZF_MAX_PREVIEW_LINES=50
 PWRFZF_LOGGING=true
 
+# Emerge behavior
+PWRFZF_USE_DEFAULT_EMERGE_OPTS=false  # Set to true to use fallback emerge options
+# Additional environment variables
+# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose"
+# export NO_COLOR=false
+#
 # Layout
 PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
-
-# Emerge options
-EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
 
 # Privilege escalation (sudo/doas/empty for root)
 PRIV_ESC="sudo"
 # PRIV_ESC="doas"
 # PRIV_ESC=""  # for root
-
-# Additional environment variables
-# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose"
-# export NO_COLOR=false
 EOF
     _pwrfzf_verbose "Created default configuration: $PWRFZF_CONFIG_FILE"
 }
@@ -273,6 +273,53 @@ function _find_emerge() {
             EMERGE_CMD="${PRIV_ESC} emerge"
         fi
     fi
+}
+
+# Then add a function to load EMERGE_DEFAULT_OPTS properly
+function _load_emerge_default_opts() {
+    # First try to get EMERGE_DEFAULT_OPTS from current environment
+    if [[ -n "$EMERGE_DEFAULT_OPTS" ]]; then
+        _pwrfzf_verbose "Using EMERGE_DEFAULT_OPTS from environment: $EMERGE_DEFAULT_OPTS"
+        return
+    fi
+    
+    # Try to source make.conf and extract EMERGE_DEFAULT_OPTS
+    local make_conf="/etc/portage/make.conf"
+    if [[ -f "$make_conf" ]]; then
+        # Safely source make.conf and capture EMERGE_DEFAULT_OPTS
+        local sourced_opts
+        sourced_opts=$(source "$make_conf" 2>/dev/null; echo "$EMERGE_DEFAULT_OPTS")
+        
+        if [[ -n "$sourced_opts" ]]; then
+            EMERGE_DEFAULT_OPTS="$sourced_opts"
+            _pwrfzf_verbose "Loaded EMERGE_DEFAULT_OPTS from $make_conf: $EMERGE_DEFAULT_OPTS"
+            return
+        fi
+    fi
+    
+    # Check make.conf.d directory
+    local make_conf_dir="/etc/portage/make.conf.d"
+    if [[ -d "$make_conf_dir" ]]; then
+        for conf_file in "$make_conf_dir"/*.conf; do
+            [[ -f "$conf_file" ]] || continue
+            local sourced_opts
+            sourced_opts=$(source "$conf_file" 2>/dev/null; echo "$EMERGE_DEFAULT_OPTS")
+            if [[ -n "$sourced_opts" ]]; then
+                EMERGE_DEFAULT_OPTS="$sourced_opts"
+                _pwrfzf_verbose "Loaded EMERGE_DEFAULT_OPTS from $conf_file: $EMERGE_DEFAULT_OPTS"
+                return
+            fi
+        done
+    fi
+
+    # Only use fallback if explicitly enabled in config
+    if [[ "${PWRFZF_USE_DEFAULT_EMERGE_OPTS:-false}" == "true" ]]; then
+        EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
+        _pwrfzf_verbose "Using fallback EMERGE_DEFAULT_OPTS: $EMERGE_DEFAULT_OPTS"
+    else
+        _pwrfzf_verbose "No EMERGE_DEFAULT_OPTS found and fallback disabled"
+    fi
+
 }
 
 # Load layout from file
@@ -2170,14 +2217,14 @@ function _add_unmask_entry() {
 function main() {
     local ARGS=() emerge_args=() SearchInput
     
-    # Apply EMERGE_DEFAULT_OPTS from config if set
+    # Use EMERGE_DEFAULT_OPTS if set (now properly loaded from make.conf)
     if [[ -n "$EMERGE_DEFAULT_OPTS" ]]; then
         _pwrfzf_verbose "Using EMERGE_DEFAULT_OPTS: $EMERGE_DEFAULT_OPTS"
         # Convert the space-separated options to an array
         IFS=' ' read -r -a default_opts_array <<< "$EMERGE_DEFAULT_OPTS"
         emerge_args+=("${default_opts_array[@]}")
     fi
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
