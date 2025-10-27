@@ -23,15 +23,15 @@
 
 <div align="center">
 
-| Package Search | Installation | Config Management |
-|:--------------:|:------------:|:-----------------:|
+|                   Package Search                    |                     Installation                     |                  Config Management                   |
+| :-------------------------------------------------: | :--------------------------------------------------: | :--------------------------------------------------: |
 | <img width="240" src="/assets/demo-screenshot.png"> | <img width="240" src="/assets/demo-screenshot2.png"> | <img width="240" src="/assets/demo-screenshot3.png"> |
-| *Fuzzy package search with preview* | *Smart installation with conflict resolution* | *Portage configuration management* |
+|         *Fuzzy package search with preview*         |    *Smart installation with conflict resolution*     |          *Portage configuration management*          |
 
-| USE Flag Management | File Operations |
-|:------------------:|:--------------:|
+|                 USE Flag Management                  |                   File Operations                    |
+| :--------------------------------------------------: | :--------------------------------------------------: |
 | <img width="240" src="/assets/demo-screenshot4.png"> | <img width="240" src="/assets/demo-screenshot5.png"> |
-| *Interactive USE flag management* | *File browser with delete operations* |
+|          *Interactive USE flag management*           |        *File browser with delete operations*         |
 
 </div>
 
@@ -75,6 +75,7 @@ pwrfzf -V
 pwrfzf -h
 # Show extended help
 pwrfzf --help
+``` 
 
 ⌨️ Keybindings Cheat Sheet
 Package Selection & Management
@@ -265,10 +266,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
     FZF for the incredible fuzzy finder
     Eix for fast package searching
     The Gentoo community for continuous inspiration and support
-<div align="center">
 
+``` <div align="center">
 Made with ❤️ for the Gentoo community
-
 If you find this tool useful, please consider giving it a ⭐ on GitHub!
 </div> ```
 
