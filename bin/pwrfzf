@@ -171,7 +171,8 @@ PWRFZF_MAX_PREVIEW_LINES=50
 PWRFZF_LOGGING=true
 
 # Emerge behavior
-PWRFZF_USE_DEFAULT_EMERGE_OPTS=false  # Set to true to use fallback emerge options
+# Set to true to use fallback emerge options
+PWRFZF_USE_DEFAULT_EMERGE_OPTS=false
 # Additional environment variables
 # export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose"
 # export NO_COLOR=false
@@ -2153,10 +2154,23 @@ function _remove_use_flags_interactive() {
 # Function to unmask packages
 function _unmask_packages() {
     local packages=("$@")
+    local real_packages=()
     
-    _pwrfzf_verbose "Unmasking packages: ${packages[*]}"
-    
+    # Filter out only valid package atoms (category/name format)
     for package in "${packages[@]}"; do
+        if [[ "$package" =~ ^[a-zA-Z0-9+_.-]+/[a-zA-Z0-9+_.-]+$ ]]; then
+            real_packages+=("$package")
+        fi
+    done
+    
+    if [[ ${#real_packages[@]} -eq 0 ]]; then
+        _pwrfzf_warning "No valid package names found in: ${packages[*]}"
+        return 1
+    fi
+    
+    _pwrfzf_verbose "Unmasking packages: ${real_packages[*]}"
+    
+    for package in "${real_packages[@]}"; do
         echo "══════════════════════════════════════"
         echo "Processing: $package"
         
@@ -2220,10 +2234,14 @@ function main() {
     # Use EMERGE_DEFAULT_OPTS if set (now properly loaded from make.conf)
     if [[ -n "$EMERGE_DEFAULT_OPTS" ]]; then
         _pwrfzf_verbose "Using EMERGE_DEFAULT_OPTS: $EMERGE_DEFAULT_OPTS"
-        # Convert the space-separated options to an array
-        IFS=' ' read -r -a default_opts_array <<< "$EMERGE_DEFAULT_OPTS"
-        emerge_args+=("${default_opts_array[@]}")
+        
+        # Use eval to properly handle shell quoting in EMERGE_DEFAULT_OPTS
+        # This correctly handles arguments with spaces and quotes
+        eval "emerge_args+=($EMERGE_DEFAULT_OPTS)"
     fi
+
+    # Always include --ask for safety in interactive mode
+    emerge_args+=("--ask")
 
     while [[ $# -gt 0 ]]; do
         case $1 in
