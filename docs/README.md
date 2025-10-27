@@ -1,4 +1,3 @@
-
 # PWRFZF - Powerful Gentoo Package Manager with FZF
 
 > **A comprehensive interactive package and repository management tool for Gentoo Linux**
@@ -23,252 +22,185 @@
 
 <div align="center">
 
-|                   Package Search                    |                     Installation                     |                  Config Management                   |
-| :-------------------------------------------------: | :--------------------------------------------------: | :--------------------------------------------------: |
+| Package Search | Installation | Config Management |
+| :------------: | :----------: | :---------------: |
 | <img width="240" src="/assets/demo-screenshot.png"> | <img width="240" src="/assets/demo-screenshot2.png"> | <img width="240" src="/assets/demo-screenshot3.png"> |
-|         *Fuzzy package search with preview*         |    *Smart installation with conflict resolution*     |          *Portage configuration management*          |
+| *Fuzzy package search with preview* | *Smart installation with conflict resolution* | *Portage configuration management* |
 
-|                 USE Flag Management                  |                   File Operations                    |
-| :--------------------------------------------------: | :--------------------------------------------------: |
+| USE Flag Management | File Operations |
+| :-----------------: | :-------------: |
 | <img width="240" src="/assets/demo-screenshot4.png"> | <img width="240" src="/assets/demo-screenshot5.png"> |
-|          *Interactive USE flag management*           |        *File browser with delete operations*         |
+| *Interactive USE flag management* | *File browser with delete operations* |
 
 </div>
 
-## 📦 Installation
+## ⌨️ Keybindings Cheat Sheet
 
-### Dependencies
+### Package Selection & Management
 
-```bash
-sudo emerge --ask app-shells/fzf app-portage/eix app-portage/portage-utils
+| Key | Action |
+|-----|--------|
+| TAB | Select package |
+| Shift-TAB | Unselect package |
+| Ctrl-d | Deselect all packages |
+| Ctrl-i | Select all packages |
+| Ctrl-r | Uninstall selected package |
 
-Install PWRFZF
-# Clone the repository
-git clone https://github.com/spikyatlinux/pwrfzf.git
-cd pwrfzf
-# Make executable
-chmod +x bin/pwrfzf
-# Optional: symlink to PATH
-sudo ln -s $(pwd)/bin/pwrfzf /usr/local/bin/pwrfzf
+### Navigation & Search
 
-🎮 Usage
-Basic Package Management
-# Interactive package search and installation
-pwrfzf
-# Search for specific packages
-pwrfzf firefox
-# Search with multiple terms
-pwrfzf gnome light
+| Key | Action |
+|-----|--------|
+| ↑↓ / Ctrl-n / Ctrl-b | Navigate up/down |
+| HOME / END | Jump to top/bottom |
+| PAGEUP / PAGEDOWN | Page up/down |
+| Ctrl-l | Clear query and selection |
+| Alt-backspace | Clear query |
+| Alt-left | Delete word |
+| Change / Typing | Jump to first result |
 
-Advanced Operations
-# Manage Portage configuration (Ctrl+o in main interface)
-pwrfzf -c
-# Sync repositories (Ctrl+s in main interface)
-pwrfzf --sync
-# Run preserved rebuild (Ctrl+z in main interface)
-pwrfzf --preserved-rebuild
-# Show keybindings
-pwrfzf -k
-# Show version
-pwrfzf -V
-# Show help
-pwrfzf -h
-# Show extended help
-pwrfzf --help
-``` 
+### System Operations
 
-⌨️ Keybindings Cheat Sheet
-Package Selection & Management
-Key	Action
-TAB	Select package
-Shift-TAB	Unselect package
-Ctrl-d	Deselect all packages
-Ctrl-i	Select all packages
-Ctrl-r	Uninstall selected package
-Navigation & Search
-Key	Action
-↑↓ / Ctrl-n / Ctrl-b	Navigate up/down
-HOME / END	Jump to top/bottom
-PAGEUP / PAGEDOWN	Page up/down
-Ctrl-l	Clear query and selection
-Alt-backspace	Clear query
-Alt-left	Delete word
-Change / Typing	Jump to first result
-System Operations
-Key	Action
-Ctrl-w	Update all world packages
-Ctrl-z	Run preserved rebuild
-Ctrl-s	Sync repositories
-Ctrl-o	Open Portage config manager
-Interface Control
-Key	Action
-Ctrl-/	Change preview window layout
-Ctrl-v	Toggle preview visibility
-?	Show keybindings help
-Ctrl-h	Show help menu
-ESC / Ctrl-q	Exit
-Portage Config Manager
-Key	Action
-Enter	Select config type / Edit file
-Ctrl-d	Delete selected file
-ESC	Back to previous menu
-⚙️ Configuration
+| Key | Action |
+|-----|--------|
+| Ctrl-w | Update all world packages |
+| Ctrl-z | Run preserved rebuild |
+| Ctrl-s | Sync repositories |
+| Ctrl-o | Open Portage config manager |
 
-PWRFZF automatically creates a configuration file at ~/.config/pwrfzf/pwrfzf-config:
-# PWRFZF Configuration File
-# Colors and display
-NO_COLOR=false
-NO_FX=false
-# Behavior settings
-PWRFZF_SHOW_INSTALLED=true
-PWRFZF_AUTO_SYNC=false
-PWRFZF_CONFIRM_ACTIONS=true
-PWRFZF_MAX_PREVIEW_LINES=50
-PWRFZF_LOGGING=true
-# Layout
-PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
-# Emerge options
-EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
+### Interface Control
 
-🔧 Portage Configuration Management
-Access the comprehensive Portage config manager with Ctrl-o or pwrfzf -c:
-Supported Configuration Types
-    make.conf - Global settings (USE flags, CFLAGS, FEATURES, etc.)
-    package.accept_keywords - Package keywords and unmasking (~amd64, etc.)
-    package.use - Package-specific USE flags management
-    package.mask - Masked packages (block installations)
-    package.unmask - Unmasked packages (force installations)
-    package.env - Build environment settings
-    package.sets - Package sets management
+| Key | Action |
+|-----|--------|
+| Ctrl-/ | Change preview window layout |
+| Ctrl-v | Toggle preview visibility |
+| ? | Show keybindings help |
+| Ctrl-h | Show help menu |
+| ESC / Ctrl-q | Exit |
 
-File Operations Available
-    Preview Files - View complete file contents without line limits
-    Edit Files - Open in your preferred editor (nvim, nano, vim, vi, gedit, kate)
-    Delete Files - Safe deletion with "DELETE" confirmation
-    Add New Entries - Interactive entry creation with validation
-    Create New Files - Intelligent filename suggestions
+### Portage Config Manager
 
-Smart Features
-    Automatic directory creation for new config files
-    Empty directory cleanup after file deletion
-    File metadata preview (size, line count, modification date)
-    Syntax validation for USE flags and package atoms
-    Version-aware package atoms (automatically uses >= format for versioned packages)
+| Key | Action |
+|-----|--------|
+| Enter | Select config type / Edit file |
+| Ctrl-d | Delete selected file |
+| ESC | Back to previous menu |
 
-🛠️ Advanced Features
-Smart Installation Engine
-Circular Dependency Resolution:
-    Automatically detects circular dependencies
-    Suggests USE flag changes to break cycles
-    Applies fixes automatically or interactively
-    Supports --autounmask-use fallback
+## 🔧 Portage Configuration Management
 
-USE Flag Management:
-    Interactive USE flag selection for problematic packages
-    View current and available USE flags
-    Add/remove USE flags with proper package atom formatting
-    Batch operations for multiple packages
+Access the comprehensive Portage config manager with `Ctrl-o` or `pwrfzf -c`:
 
-Keyword Unmasking:
-    Automatic detection of masked packages
-    Interactive keyword selection (~amd64, ~arm64, amd64, etc.)
-    Proper package.accept_keywords file management
-    Version-aware unmasking
+### Supported Configuration Types
 
-Intelligent Preview System
+- `make.conf` - Global settings (USE flags, CFLAGS, FEATURES, etc.)
+- `package.accept_keywords` - Package keywords and unmasking (~amd64, etc.)
+- `package.use` - Package-specific USE flags management
+- `package.mask` - Masked packages (block installations)
+- `package.unmask` - Unmasked packages (force installations)
+- `package.env` - Build environment settings
+- `package.sets` - Package sets management
 
-Package Information:
-    Complete eix output with versions and slots
-    Installation status ([I] for installed, [ ] for not installed)
-    USE flags and keywords
-    Size information and download stats
+### File Operations Available
 
-Configuration Status:
-    Current package.* configuration affecting the package
-    USE flag settings from package.use
-    Keyword settings from package.accept_keywords
-    Mask/unmask status
+- **Preview Files** - View complete file contents without line limits
+- **Edit Files** - Open in your preferred editor (nvim, nano, vim, vi, gedit, kate)
+- **Delete Files** - Safe deletion with "DELETE" confirmation
+- **Add New Entries** - Interactive entry creation with validation
+- **Create New Files** - Intelligent filename suggestions
 
-File System:
-    Installed files preview (via qlist)
-    File metadata in browser views
-Safety Features
+### Smart Features
 
-Confirmation Systems:
-    Installation confirmation before proceeding
-    File deletion requires typing "DELETE"
-    USE flag changes show before/after preview
-    Configuration changes are explicit
+- Automatic directory creation for new config files
+- Empty directory cleanup after file deletion
+- File metadata preview (size, line count, modification date)
+- Syntax validation for USE flags and package atoms
+- Version-aware package atoms (automatically uses >= format for versioned packages)
 
-Error Recovery:
-    Automatic retry with configuration fixes
-    Clear error messages with suggested solutions
-    Fallback options for failed operations
-    Comprehensive logging for troubleshooting
+## 🛠️ Advanced Features
 
-State Management:
-    Auto-retry with same package selection after config changes
-    Proper handling of user cancellations
-    Clean terminal state restoration after editor sessions
+### Smart Installation Engine
 
-🐛 Troubleshooting
-Common Issues
-Missing Dependencies:
-sudo emerge --ask fzf eix portage-utils
-Permission Issues:
+**Circular Dependency Resolution:**
+- Automatically detects circular dependencies
+- Suggests USE flag changes to break cycles
+- Applies fixes automatically or interactively
+- Supports --autounmask-use fallback
 
-# Ensure sudo is properly configured
-sudo -v
-# If using doas instead:
-export PRIV_ESC=doas
+**USE Flag Management:**
+- Interactive USE flag selection for problematic packages
+- View current and available USE flags
+- Add/remove USE flags with proper package atom formatting
+- Batch operations for multiple packages
 
-Configuration Problems:
-# Reset to default configuration
-rm ~/.config/pwrfzf/pwrfzf-config
-pwrfzf  # Will recreate with defaults
-# Check logs if enabled
-tail -f ~/.config/pwrfzf/pwrfzf.log
+**Keyword Unmasking:**
+- Automatic detection of masked packages
+- Interactive keyword selection (~amd64, ~arm64, amd64, etc.)
+- Proper package.accept_keywords file management
+- Version-aware unmasking
 
-Editor Issues:
-# Ensure you have at least one editor installed
-sudo emerge --ask nano  # or vim, neovim, etc.
+### Intelligent Preview System
 
-Logging
-Enable detailed logging in configuration:
-PWRFZF_LOGGING=true
+**Package Information:**
+- Complete eix output with versions and slots
+- Installation status ([I] for installed, [ ] for not installed)
+- USE flags and keywords
+- Size information and download stats
 
-View logs:
-tail -f ~/.config/pwrfzf/pwrfzf.log
+**Configuration Status:**
+- Current package.* configuration affecting the package
+- USE flag settings from package.use
+- Keyword settings from package.accept_keywords
+- Mask/unmask status
 
-Logs include:
-    Startup information and arguments
-    All user interactions and selections
-    Emerge commands and outputs
-    Configuration changes
-    Error details and recovery attempts
+**File System:**
+- Installed files preview (via qlist)
+- File metadata in browser views
 
-🔄 Update
-To update PWRFZF to the latest version:
-cd /path/to/pwrfzf
-git pull origin main
-🤝 Contributing
+### Safety Features
+
+**Confirmation Systems:**
+- Installation confirmation before proceeding
+- File deletion requires typing "DELETE"
+- USE flag changes show before/after preview
+- Configuration changes are explicit
+
+**Error Recovery:**
+- Automatic retry with configuration fixes
+- Clear error messages with suggested solutions
+- Fallback options for failed operations
+- Comprehensive logging for troubleshooting
+
+**State Management:**
+- Auto-retry with same package selection after config changes
+- Proper handling of user cancellations
+- Clean terminal state restoration after editor sessions
+
+**Logs include:**
+- Startup information and arguments
+- All user interactions and selections
+- Emerge commands and outputs
+- Configuration changes
+- Error details and recovery attempts
+
+## 🤝 Contributing
 
 Contributions are welcome! Please feel free to:
-    Fork the repository
-    Create a feature branch
-    Submit pull requests
-    Open issues for bugs and feature requests
-📄 License
+- Fork the repository
+- Create a feature branch
+- Submit pull requests
+- Open issues for bugs and feature requests
+
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-🙏 Acknowledgments
-    Gentoo Linux for the amazing package management system
-    FZF for the incredible fuzzy finder
-    Eix for fast package searching
-    The Gentoo community for continuous inspiration and support
 
-``` <div align="center">
+## 🙏 Acknowledgments
+
+- Gentoo Linux for the amazing package management system
+- FZF for the incredible fuzzy finder
+- Eix for fast package searching
+- The Gentoo community for continuous inspiration and support
+
+<div align="center">
 Made with ❤️ for the Gentoo community
 If you find this tool useful, please consider giving it a ⭐ on GitHub!
-</div> ```
-
+</div>
