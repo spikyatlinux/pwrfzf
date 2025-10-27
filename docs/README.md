@@ -35,6 +35,86 @@
 
 </div>
 
+# Quick Install
+```
+git clone https://github.com/spikyatlinux/pwrfzf.git
+cd pwrfzf
+sudo cp pwrfzf /usr/local/bin/
+```
+
+# Ensure you have the required dependencies installed:
+```
+emerge --ask fzf eix app-portage/portage-utils
+```
+
+# Basic Package Management
+```
+# Interactive package browser
+pwrfzf
+
+# Search for specific packages
+pwrfzf firefox
+
+# Open Portage configuration manager
+pwrfzf -c
+
+# Sync repositories
+pwrfzf --sync
+
+# Run preserved rebuild
+pwrfzf --preserved-rebuild
+
+# Show keybindings
+pwrfzf -k
+
+# Show version
+pwrfzf -V
+```
+
+# Configuration file ~/.config/pwrfzf/pwrfzf-config
+```
+# PWRFZF Configuration File
+
+# Colors and display
+NO_COLOR=false
+NO_FX=false
+
+# Behavior
+PWRFZF_SHOW_INSTALLED=true
+PWRFZF_AUTO_SYNC=false
+PWRFZF_CONFIRM_ACTIONS=true
+PWRFZF_MAX_PREVIEW_LINES=50
+PWRFZF_LOGGING=true
+
+# Layout
+PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
+
+# Emerge options
+EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
+
+# Privilege escalation (sudo/doas/empty for root)
+PRIV_ESC="sudo"
+# PRIV_ESC="doas"
+# PRIV_ESC=""  # for root
+
+# Additional environment variables
+# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose --quiet-build=y"
+# export NO_COLOR=false
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `NO_COLOR` | Disable colored output | `false` |
+| `NO_FX` | Disable terminal effects | `false` |
+| `PWRFZF_SHOW_INSTALLED` | Show installed packages in search results | `true` |
+| `PWRFZF_AUTO_SYNC` | Auto-sync repositories before operations | `false` |
+| `PWRFZF_CONFIRM_ACTIONS` | Confirm before installation/removal | `true` |
+| `PWRFZF_MAX_PREVIEW_LINES` | Maximum lines in package preview window | `50` |
+| `PWRFZF_LOGGING` | Enable logging to file | `true` |
+| `PWRFZF_PREVIEW_WINDOW` | FZF preview window position and size | `"right,60%,border-left"` |
+| `EMERGE_DEFAULT_OPTS` | Default options passed to emerge command | `"--quiet-build=y --keep-going"` |
+| `PRIV_ESC` | Privilege escalation command | `"sudo"` |
+
 ## ⌨️ Keybindings Cheat Sheet
 
 ### Package Selection & Management
@@ -181,36 +261,6 @@ Access the comprehensive Portage config manager with `Ctrl-o` or `pwrfzf -c`:
 - Emerge commands and outputs
 - Configuration changes
 - Error details and recovery attempts
-
-## Sample config 
-```
-# PWRFZF Configuration File
-# Colors and display
-NO_COLOR=false
-NO_FX=false
-
-# Behavior
-PWRFZF_SHOW_INSTALLED=true
-PWRFZF_AUTO_SYNC=false
-PWRFZF_CONFIRM_ACTIONS=true
-PWRFZF_MAX_PREVIEW_LINES=50
-PWRFZF_LOGGING=true
-
-# Layout
-PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
-
-# Emerge options
-EMERGE_DEFAULT_OPTS="--quiet-build=y --keep-going"
-
-# Privilege escalation (sudo/doas/empty for root)
-PRIV_ESC="sudo"
-# PRIV_ESC="doas"
-# PRIV_ESC=""  # for root
-
-# Additional environment variables
-# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose --quiet-build=y"
-# export NO_COLOR=false
-```
 
 ## 🤝 Contributing
 Contributions are welcome! Please feel free to:
