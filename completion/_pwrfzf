@@ -4,9 +4,14 @@ _pwrfzf() {
   local -a args
 
   args=(
-    '(-h --help:)'{-h,--help}'[Show the help documentation (-h shows simple help, --help shows extended help)]'
-    '(-k --keybindings)'{-k,--keybindings}'[List keybindings for pwrfzf]'
-    '(-V --version)'{-V,--version}'[Show version of pwrfzf]'
+    '(-h --help)'{-h,--help}'[Show the help menu]'
+    '--help-full[Show the extended help menu]'
+    '(-k --keybindings)'{-k,--keybindings}'[List keybindings]'
+    '(-V --version)'{-V,--version}'[Show version]'
+    '(-c --config)'{-c,--config}'[Manage Portage configuration]'
+    '--depclean[Run emerge --depclean]'
+    '--preserved-rebuild[Run preserved rebuild]'
+    '--sync[Sync repositories]'
   )
 
   _arguments -C \
