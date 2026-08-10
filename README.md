@@ -51,13 +51,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 **By using PWRFZF, you acknowledge that you understand these risks and accept full responsibility for any consequences to your system.**
 
-*Last updated: 2025-10-27
-* Updated: 2026-08-10*
+*Last updated: 2026-08-10*
+
 # PWRFZF - Powerful Gentoo Package Manager with FZF
 
 > **A comprehensive interactive package and repository management tool for Gentoo Linux**
 
-[![Gentoo](https://img.shields.io/badge/Gentoo-Linux-54487A?style=for-the-badge&logo=gentoo&logoColor=white)]([https://gentoo.org](https://gentoo.org))
+[![Gentoo](https://img.shields.io/badge/Gentoo-Linux-54487A?style=for-the-badge&logo=gentoo&logoColor=white)](https://gentoo.org)
 [![Bash](https://img.shields.io/badge/Bash-4.0+-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![FZF](https://img.shields.io/badge/FZF-Powered-00A0DC?style=for-the-badge)](https://github.com/junegunn/fzf)
 
@@ -71,14 +71,15 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 
 - **🔍 Interactive Package Search** - Fuzzy find packages with instant preview using eix
 - **⚡ Smart Installation** - Automatic dependency resolution with circular dependency handling
-- **📜 Emerge History** - Built-in history viewer tracking your recently installed/uninstalled packages using genlop or qlop. 
+- **📜 Emerge History** - Built-in history viewer tracking your recently installed/uninstalled packages using genlop or qlop
 - **🎨 Beautiful Interface** - Custom color themes with full Unicode support and borders
-- **🔧 Complete Portage Config Manager** - Manage ALL Portage configuration files, including a full `/etc/portage` directory explorer.
+- **🔧 Complete Portage Config Manager** - Manage ALL Portage configuration files, including a full directory explorer
 - **🛡️ Safe Operations** - Confirmation prompts, live emerge argument editing, and automatic configuration fixes
 - **📊 Real-time Preview** - Package info, USE flags, installed files, and config status
 - **🔄 Auto-Retry System** - Automatic retry with USE flag and keyword fixes
 - **🗑️ File Management** - Create, edit, and delete configuration files safely
-- **📝 Intelligent** logging system and smart config updating mechanism.
+- **📝 Intelligent** logging system and smart config updating mechanism
+- **🔧 Smart package** installation with fallback analysis
 
 ## 📸 Screenshots
 | Package Search | Installation | Config Management |
@@ -93,9 +94,9 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 
 ## Quick Install
 ```bash
-git clone [https://github.com/spikyatlinux/pwrfzf.git](https://github.com/spikyatlinux/pwrfzf.git)
-# or from mirror
-# git clone [https://git.mysusi.org/spikyatlinux/pwrfzf.git](https://git.mysusi.org/spikyatlinux/pwrfzf.git)
+git clone https://github.com/spikyatlinux/pwrfzf.git
+or from mirror
+git clone https://git.mysusi.org/spikyatlinux/pwrfzf.git
 cd pwrfzf
 sudo cp -v ./bin/pwrfzf /usr/local/bin/
 ```
@@ -133,9 +134,53 @@ pwrfzf -k
 pwrfzf -V
 ```
 
-## Configuration file `~/.config/pwrfzf/pwrfzf-config`
+## Configuration file ~/.config/pwrfzf/pwrfzf-config
 
-The configuration file is automatically generated and updated with new variables on startup.
+The configuration file is automatically generated and smartly updated with new variables on startup.
+
+```bash
+# PWRFZF Configuration File
+
+# Colors and display
+NO_COLOR=false
+NO_FX=false
+
+# Behavior
+PWRFZF_SHOW_INSTALLED=true
+PWRFZF_AUTO_SYNC=false
+PWRFZF_CONFIRM_ACTIONS=true
+PWRFZF_MAX_PREVIEW_LINES=50
+PWRFZF_LOGGING=true
+
+# FZF Layout (reverse = top-down, default = bottom-up)
+PWRFZF_FZF_LAYOUT="reverse"
+
+# Search Behavior
+# TRUE  = Exact substring match (e.g. 'wine' won't match 'window')
+# FALSE = Fuzzy match (e.g. 'wine' matches 'w..i..n..e')
+# When false you can use 'wine to search for exact name
+PWRFZF_EXACT_SEARCH=true
+
+# Search Targets
+# TRUE  = Search ONLY in package names (e.g. app-emulation/wine)
+# FALSE = Search in package names AND descriptions
+PWRFZF_SEARCH_NAMES_ONLY=false
+
+# History Tool (auto, genlop, qlop, log)
+PWRFZF_HISTORY_CMD="auto"
+
+# Emerge behavior
+PWRFZF_USE_DEFAULT_EMERGE_OPTS=false
+# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose"
+
+# Layout
+PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
+
+# Privilege escalation (sudo/doas/empty for root)
+PRIV_ESC="sudo"
+# PRIV_ESC="doas"
+# PRIV_ESC=""  # for root
+```
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -188,6 +233,7 @@ The configuration file is automatically generated and updated with new variables
 | Ctrl-l | Clear query and selection |
 | Alt-backspace | Clear query |
 | Alt-left | Delete word |
+| Change / Typing | Jump to first result |
 
 ### Interface Control
 
@@ -200,15 +246,15 @@ The configuration file is automatically generated and updated with new variables
 
 ## 📦 Interactive Installation Menu
 
-When confirming an action, you have access to a powerful interactive prompt:
+When confirming an action (`PWRFZF_CONFIRM_ACTIONS=true`), you have access to a powerful interactive prompt:
 
 - `[y]` **Yes**, proceed with current command
 - `[n]` **No**, cancel and return to search (default)
 - `[o]` **Add --oneshot (-1)** flag to avoid polluting your `@world` file
 - `[d]` **Add --depclean (-c)** flag for safe dependency-aware removal
 - `[e]` **Edit emerge arguments manually** in a live prompt
-- `[r]` **Remove packages** from your current selection via a pop-up menu
-- `[s]` **Save selected packages** to a Portage Set in `/etc/portage/sets/`
+- `[r]` **Remove packages** from your current selection via an FZF pop-up menu
+- `[s]` **Save selected packages** to a Portage Set in `/etc/portage/sets/` without installing
 
 ## 🔧 Portage Configuration Management
 
@@ -217,7 +263,8 @@ Access the comprehensive Portage config manager with `Ctrl-o` or `pwrfzf -c`:
 ### File Browser Mode
 A full directory explorer for `/etc/portage` that detects if you are hovering over a file or a folder, providing `ls -lh` previews for directories and content previews for files using a native, searchable `fzf` viewer.
 
-### Guided Configuration Types
+### Supported Configuration Types
+
 - `make.conf` - Global settings (USE flags, CFLAGS, FEATURES, etc.)
 - `package.accept_keywords` - Package keywords and unmasking (~amd64, etc.)
 - `package.use` - Package-specific USE flags management
@@ -227,11 +274,79 @@ A full directory explorer for `/etc/portage` that detects if you are hovering ov
 - `package.sets` - Package sets management
 
 ### File Operations Available
-- **Preview Files** - View file contents using a fully searchable native FZF pager.
-- **Edit Files** - Open in your preferred editor (nvim, nano, vim, vi, gedit, kate) instantly.
-- **Delete Files** - Safe deletion with "yes" confirmation
+
+- **Preview Files** - View complete file contents using a searchable native FZF pager
+- **Edit Files** - Open in your preferred editor (nvim, nano, vim, vi, gedit, kate) instantly
+- **Delete Files** - Safe deletion with confirmation
 - **Add New Entries** - Interactive entry creation with validation
 - **Create New Files** - Intelligent filename suggestions
+
+### Smart Features
+
+- Automatic directory creation for new config files
+- Empty directory cleanup after file deletion
+- File metadata preview (size, line count, modification date)
+- Syntax validation for USE flags and package atoms
+- Version-aware package atoms (automatically uses >= format for versioned packages)
+
+## 🛠️ Advanced Features
+
+### Smart Installation Engine
+
+**Circular Dependency Resolution:**
+- Automatically detects circular dependencies
+- Suggests USE flag changes to break cycles
+- Applies fixes automatically or interactively
+- Supports --autounmask-use fallback
+
+**USE Flag Management:**
+- Interactive USE flag selection for problematic packages
+- View current and available USE flags
+- Add/remove USE flags with proper package atom formatting
+- Batch operations for multiple packages
+
+**Keyword Unmasking:**
+- Automatic detection of masked packages
+- Interactive keyword selection (~amd64, ~arm64, amd64, etc.)
+- Proper package.accept_keywords file management
+- Version-aware unmasking
+
+### Intelligent Preview System
+
+**Package Information:**
+- Complete eix output with versions and slots
+- Installation status ([I] for installed, [ ] for not installed)
+- USE flags and keywords
+- Size information and download stats
+
+**Configuration Status:**
+- Current package.* configuration affecting the package
+- USE flag settings from package.use
+- Keyword settings from package.accept_keywords
+- Mask/unmask status
+
+**File System:**
+- Installed files preview (via qlist)
+- File metadata in browser views
+
+### Safety Features
+
+**Confirmation Systems:**
+- Installation confirmation before proceeding
+- File deletion requires typing confirmation
+- USE flag changes show before/after preview
+- Configuration changes are explicit
+
+**Error Recovery:**
+- Automatic retry with configuration fixes
+- Clear error messages with suggested solutions
+- Fallback options for failed operations
+- Built-in syntax error filter for improperly split `EMERGE_DEFAULT_OPTS`
+
+**State Management:**
+- Auto-retry with same package selection after config changes
+- Proper handling of user cancellations
+- Clean terminal state restoration after editor sessions
 
 ## 🤝 Contributing
 Contributions are welcome! Please feel free to:
@@ -241,7 +356,15 @@ Contributions are welcome! Please feel free to:
 - Open issues for bugs and feature requests
 
 ## 📄 License
+
 This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Gentoo Linux for the amazing package management system
+- FZF for the incredible fuzzy finder
+- Eix for fast package searching
+- The Gentoo community for continuous inspiration and support
 
 ---
 
@@ -271,4 +394,9 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
 * Fixed an issue where `Ctrl-r` (Unmerge) would fail if the package name from FZF contained trailing colons.
 * Fixed an array accumulation bug where aborted installations would endlessly duplicate packages and arguments in the background list.
 * Fixed the `Ctrl-i` keybinding. Changed from FZF's native `toggle-all` to `toggle` to prevent accidentally queuing the entire portage tree for installation.
-* Fixed a bug where `fzf` subshells failed to render the `_print_divider` UI element.
+* Fixed a bug where `fzf` subshells failed to render the UI elements properly.
+
+<div align="center">
+Made with ❤️ for the Gentoo community
+If you find this tool useful, please consider giving it a ⭐ on GitHub!
+</div>
