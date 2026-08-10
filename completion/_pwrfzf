@@ -18,5 +18,3 @@ _pwrfzf() {
     "${args[@]}" \
     ':query:_files'
 }
-
-_pwrfzf "${@}"
