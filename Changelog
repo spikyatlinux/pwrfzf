@@ -1,0 +1,47 @@
+Changelog: Version 2.2
+
+✨ New Features:
+
+    Emerge History Viewer (Ctrl-y): Added a history tracking tool that parses your unmerge/merge history. Supports genlop, qlop, or raw /var/log/emerge.log files.
+
+    System Depclean (Ctrl-x): Added a global shortcut and a CLI argument (--depclean) to trigger emerge -a --depclean instantly.
+
+    Toggle Installed Packages (Ctrl-p): Seamlessly toggle the live search list between all packages and installed packages only.
+
+    Interactive Installation Options: The confirmation screen now features advanced live-editing capabilities:
+
+        [o] Append --oneshot to avoid cluttering the world set.
+
+        [d] Append --depclean for safe package removal.
+
+        [e] Edit emerge arguments manually in a pre-filled readline prompt.
+
+        [r] Open an FZF pop-up to dynamically drop specific packages from your current selection.
+
+        [s] Save your currently selected packages directly into /etc/portage/sets/ without installing them.
+
+    Smart Config Updater: pwrfzf-config now features a smart-append mechanism. If new variables are introduced in future versions, they are automatically appended to your existing config file without overwriting your custom settings.
+
+    Search Customization: Added PWRFZF_EXACT_SEARCH to disable confusing fuzzy matches (defaulting to exact substring matching) and PWRFZF_SEARCH_NAMES_ONLY to restrict searches exclusively to package names.
+
+    Top-Down Layout Default: Implemented PWRFZF_FZF_LAYOUT="reverse" for a modern, top-down search experience (configurable).
+
+🚀 Improvements:
+
+    Native FZF File Viewer: Replaced less -R with a custom FZF-based file pager. Previews and config files are now fully searchable without breaking the terminal UI.
+
+    Directory Previews: The Config Explorer now detects directories on-the-fly and runs a colored ls -lh inside the preview pane.
+
+    Instant Editor Launch: Removed the disruptive "Press any key to continue" prompts when opening nvim or nano to maintain a seamless workflow.
+
+    Smarter Argument Parsing: Implemented a robust filter that actively ignores complex make.conf arguments like --buildpkg-exclude */* before they hit the editor prompt, preventing false "invalid package atom" syntax errors in Portage.
+
+🐛 Bug Fixes:
+
+    Fixed an issue where Ctrl-r (Unmerge) would fail if the package name from FZF contained trailing colons.
+
+    Fixed an array accumulation bug where aborted installations would endlessly duplicate packages and arguments in the background list.
+
+    Fixed the Ctrl-i keybinding. Changed from FZF's native toggle-all to toggle to prevent accidentally queuing the entire portage tree for installation.
+
+    Fixed a bug where fzf subshells failed to render the _print_divider UI element.
