@@ -1,3 +1,17 @@
+Changelog: Version 2.3
+✨ New Features:
+    Advanced eLog Viewer (elogfzf): Added a powerful built-in interactive viewer for /var/log/portage/elog. Features live previews (with bat syntax highlighting if available), deleting single logs (F2), and wiping all logs (F3).
+    elogv Support: Added support for the official app-portage/elogv tool as an alternative history backend.
+    Configurable Editor: Introduced the PWRFZF_EDITOR variable in the configuration file. You can now enforce a specific editor (like nano or kate) independently from your system's $EDITOR variable.
+
+🚀 Improvements:
+    Robust Wrapper Compatibility: Replaced the fragile $0 vs BASH_SOURCE entry-point check with a bulletproof case fallback. The script now starts flawlessly even when executed through complex Wayland/X11 terminal wrappers (like polyterm on Sway/i3).
+    Reliable Subshell Configurations: FZF subshells triggered by keybindings (like Ctrl-y or Ctrl-p) now correctly inherit the updated pwrfzf-config instead of falling back to default values.
+
+🐛 Bug Fixes:
+    Editor TTY Fix: Resolved an issue where pressing Enter to open an eLog file in an editor would fail or close instantly. fzf now returns the file path to the main loop, leveraging the robust _launch_editor function.
+    Scrolling Fix: Removed the explicit wheel-up FZF bindings to prevent unsupported key errors, allowing native FZF mouse scrolling to work out-of-the-box.
+-------------------------------------------------------
 Changelog: Version 2.2
 
 ✨ New Features:

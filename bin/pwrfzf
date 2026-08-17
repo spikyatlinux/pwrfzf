@@ -20,14 +20,13 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.2"
+readonly PWRFZF_VERSION="2.3"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
 readonly PORTAGE_ETC="/etc/portage"
-
-# Set default FZF layout to top-down (Position 1 at the top)
-export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:-} --layout=reverse"
+readonly ELOG_DIR="/var/log/portage/elog"
+readonly EMERGE_LOG="/var/log/emerge.log"
 
 # Configuration directories
 PWRFZF_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/${PROG}"
@@ -44,10 +43,11 @@ PWRFZF_AUTO_SYNC="${PWRFZF_AUTO_SYNC:-false}"
 PWRFZF_CONFIRM_ACTIONS="${PWRFZF_CONFIRM_ACTIONS:-true}"
 PWRFZF_MAX_PREVIEW_LINES="${PWRFZF_MAX_PREVIEW_LINES:-50}"
 PWRFZF_LOGGING="${PWRFZF_LOGGING:-false}"
-PWRFZF_HISTORY_CMD="${PWRFZF_HISTORY_CMD:-auto}"
+PWRFZF_HISTORY_CMD="${PWRFZF_HISTORY_CMD:-elogv}"
 PWRFZF_FZF_LAYOUT="${PWRFZF_FZF_LAYOUT:-reverse}"
 PWRFZF_EXACT_SEARCH="${PWRFZF_EXACT_SEARCH:-true}"
 PWRFZF_SEARCH_NAMES_ONLY="${PWRFZF_SEARCH_NAMES_ONLY:-false}"
+PWRFZF_EDITOR="${PWRFZF_EDITOR:-}"
 
 declare -g PWRFZF_MODE="packages"
 declare -g PWRFZF_LAYOUT="default"
@@ -141,20 +141,20 @@ function _update_config() {
   local updated=false
   local target="$PWRFZF_CONFIG_FILE"
 
-  # Hilfsfunktion: Prüft, ob eine Variable existiert (auch auskommentiert).
-  # Falls nicht, wird der übergebene Block samt Kommentaren unten angehängt.
+  # Helper function: Checks if a variable exists (even if commented out).
+  # If not, the provided block including comments is appended to the bottom.
   _append_if_missing() {
     local var_name="$1"
     local content="$2"
     
-    # Sucht nach VAR= oder #VAR= oder # VAR=
+    # Matches VAR= or #VAR= or # VAR=
     if ! grep -qE "^[#[:space:]]*${var_name}=" "$target" 2>/dev/null; then
       echo -e "\n$content" >> "$target"
       updated=true
     fi
   }
 
-  # --- Hier kommen alle zukünftigen Variablen rein ---
+  # --- Append new configuration variables here ---
 
   _append_if_missing "PWRFZF_FZF_LAYOUT" "# FZF Layout (reverse = top-down, default = bottom-up)
 PWRFZF_FZF_LAYOUT=\"reverse\""
@@ -170,14 +170,18 @@ PWRFZF_EXACT_SEARCH=true"
 # FALSE = Search in package names AND descriptions
 PWRFZF_SEARCH_NAMES_ONLY=false"
 
-  _append_if_missing "PWRFZF_HISTORY_CMD" "# History Tool (auto, genlop, qlop, log)
-PWRFZF_HISTORY_CMD=\"auto\""
+  _append_if_missing "PWRFZF_HISTORY_CMD" "# History / Log Backend (elogv, elogfzf, genlop, qlop, log, auto)
+PWRFZF_HISTORY_CMD=\"elogv\""
 
-  # ---------------------------------------------------
+  _append_if_missing "PWRFZF_EDITOR" "# Preferred text editor for config files and eLogs
+# (e.g. nvim, nano, vim, kate, gedit). Leave empty to use system default (\$EDITOR).
+PWRFZF_EDITOR=\"\""
+
+  # -----------------------------------------------
 
   if [[ "$updated" == "true" ]]; then
     _pwrfzf_verbose "Config file updated with new variables."
-    # Config sofort neu laden, damit die neuen Variablen im laufenden Skript aktiv sind
+    # Reload config immediately so new variables are active in running script
     source "$target" 2>/dev/null
   fi
 }
@@ -194,7 +198,6 @@ function _validate_config() {
   fi
   
   if [[ "$PWRFZF_LOGGING" != "true" && "$PWRFZF_LOGGING" != "false" ]]; then
-    _pwrfzf_warning "Invalid PWRFZF_LOGGING value. Using default: false"
     PWRFZF_LOGGING="false"
   fi
 
@@ -208,6 +211,11 @@ function _validate_config() {
   
   if [[ "$PWRFZF_SEARCH_NAMES_ONLY" != "true" && "$PWRFZF_SEARCH_NAMES_ONLY" != "false" ]]; then
     PWRFZF_SEARCH_NAMES_ONLY="false"
+  fi
+
+  # Set default editor if empty
+  if [[ -z "$PWRFZF_EDITOR" ]]; then
+    PWRFZF_EDITOR="${EDITOR:-nvim}"
   fi
   
   # Inject layout and exact-match globally into FZF
@@ -245,8 +253,12 @@ PWRFZF_EXACT_SEARCH=true
 # FALSE = Search in package names AND descriptions
 PWRFZF_SEARCH_NAMES_ONLY=false
 
-# History Tool (auto, genlop, qlop, log)
-PWRFZF_HISTORY_CMD="auto"
+# History / Log Backend (elogv, elogfzf, genlop, qlop, log, auto)
+PWRFZF_HISTORY_CMD="elogv"
+
+# Preferred text editor for config files and eLogs
+# (e.g. nvim, nano, vim, kate, gedit). Leave empty to use system default ($EDITOR).
+PWRFZF_EDITOR=""
 
 # Emerge behavior
 PWRFZF_USE_DEFAULT_EMERGE_OPTS=false
@@ -324,7 +336,6 @@ function _load_emerge_default_opts() {
     return
   fi
   
-  # Try to extract EMERGE_DEFAULT_OPTS securely
   local sourced_opts
   if [[ -f "${PORTAGE_ETC}/make.conf" ]]; then
     sourced_opts=$(source "${PORTAGE_ETC}/make.conf" 2>/dev/null; echo "$EMERGE_DEFAULT_OPTS")
@@ -411,7 +422,7 @@ KEYBINDINGS:
               Ctrl-z : Run preserved rebuild
               Ctrl-s : Sync repositories
               Ctrl-p : Toggle installed packages only
-              Ctrl-y : View Emerge History
+              Ctrl-y : View eLogs / Emerge History
               Ctrl-o : Open Portage Config Manager
               Ctrl-/ : Change layout
               Ctrl-v : Hide/show preview
@@ -525,30 +536,91 @@ function __fzf_preview() {
 }
 
 # ------------------------------------------------------------------------------
-# EMERGE HISTORY
+# EMERGE HISTORY & ELOG VIEWER
 # ------------------------------------------------------------------------------
 function _show_emerge_history() {
-  local cmd
-  if [[ "${PWRFZF_HISTORY_CMD:-auto}" == "genlop" ]] && command -v genlop >/dev/null 2>&1; then
-    cmd="genlop -l"
-  elif [[ "${PWRFZF_HISTORY_CMD:-auto}" == "qlop" ]] && command -v qlop >/dev/null 2>&1; then
-    cmd="qlop -l"
-  elif [[ "${PWRFZF_HISTORY_CMD:-auto}" == "log" ]] && [[ -f /var/log/emerge.log ]]; then
-    cmd="grep -E '(completed|unmerged)' /var/log/emerge.log"
-  else
-    # Auto: Genlop is preferred over qlop because qlop often truncates piped output
-    if command -v genlop >/dev/null 2>&1; then cmd="genlop -l"
-    elif command -v qlop >/dev/null 2>&1; then cmd="qlop -l"
-    elif [[ -f /var/log/emerge.log ]]; then cmd="grep -E '(completed|unmerged)' /var/log/emerge.log"
+  local history_mode="${PWRFZF_HISTORY_CMD:-elogv}"
+
+  if [[ "$history_mode" == "auto" ]]; then
+    if [[ -d "$ELOG_DIR" ]] && [[ -n "$(ls -A "$ELOG_DIR" 2>/dev/null)" ]]; then
+      history_mode="elogv"
+    elif command -v genlop >/dev/null 2>&1; then
+      history_mode="genlop"
+    elif command -v qlop >/dev/null 2>&1; then
+      history_mode="qlop"
+    elif [[ -f "$EMERGE_LOG" ]]; then
+      history_mode="log"
     else
-      echo "No history tool found (install app-portage/genlop or app-portage/portage-utils)."
-      read -n1 -s
-      return
+      history_mode="elogv"
     fi
   fi
-  
-  eval "$cmd" | fzf --tac --no-sort --ansi --header "Emerge History ($cmd)" \
-    --border 'double' --border-label="┨${PROG} - History┠" --color="${pwrfzf_colortheme}"
+
+  case "$history_mode" in
+    elogfzf)
+      if [[ ! -d "$ELOG_DIR" ]]; then
+        echo "eLog directory not found at $ELOG_DIR"
+        read -n1 -s
+        return
+      fi
+
+      local bat_cmd="cat"
+      command -v bat >/dev/null 2>&1 && bat_cmd="bat --style=plain --color=always"
+
+      while true; do
+        local log_files
+        log_files=$(find "$ELOG_DIR" -type f -printf "%T@ %p\n" 2>/dev/null | sort -nr | cut -d' ' -f2-)
+        
+        [[ -z "$log_files" ]] && { echo "No eLog files found."; sleep 1; break; }
+
+        local selected
+        # 💥 CRITICAL FIX: Removed --bind "enter:execute(...)"
+        # Now FZF properly closes, returns the file to Bash, and we open it robustly via _launch_editor
+        selected=$(echo "$log_files" | fzf \
+          --preview "$bat_cmd {} 2>/dev/null || cat {}" \
+          --preview-window="right:60%:wrap:follow" \
+          --bind "f2:execute(bash -c 'rm -i \"{}\"')+reload(find \"$ELOG_DIR\" -type f -printf \"%T@ %p\n\" | sort -nr | cut -d\" \" -f2-)" \
+          --bind "f3:execute(bash -c 'read -p \"Delete ALL eLogs? (yes/NO): \" confirm; [[ \$confirm == yes ]] && find \"$ELOG_DIR\" -type f -delete && echo \"All logs deleted.\"; read -n1 -rsp \"Press any key...\"')+reload(find \"$ELOG_DIR\" -type f -printf \"%T@ %p\n\" | sort -nr | cut -d\" \" -f2-)" \
+          --bind "pgup:preview-up,pgdn:preview-down,ctrl-u:preview-up,ctrl-d:preview-down" \
+          --header "ENTER: open | F2: delete log | F3: delete ALL logs | PgUp/Dn or Ctrl-U/D: scroll" \
+          --border 'double' --border-label="┨${PROG} - eLog Viewer (elogfzf)┠" --color="${pwrfzf_colortheme}")
+        
+        [[ -z "$selected" ]] && break
+        
+        # Launch editor natively in the main loop to avoid subshell issues
+        _launch_editor "$selected"
+      done
+      ;;
+    elogv)
+      if command -v elogv >/dev/null 2>&1; then
+        elogv
+      else
+        echo "elogv is not installed. Please emerge app-portage/elogv"
+        read -n1 -s
+      fi
+      ;;
+    genlop)
+      genlop -l | fzf --tac --no-sort --ansi --header "Emerge History (genlop)" \
+        --border 'double' --border-label="┨${PROG} - History┠" --color="${pwrfzf_colortheme}"
+      ;;
+    qlop)
+      qlop -l | fzf --tac --no-sort --ansi --header "Emerge History (qlop)" \
+        --border 'double' --border-label="┨${PROG} - History┠" --color="${pwrfzf_colortheme}"
+      ;;
+    log)
+      if [[ -f "$EMERGE_LOG" ]]; then
+        grep -E '(completed|unmerged)' "$EMERGE_LOG" | fzf --tac --no-sort \
+          --header "Emerge History (emerge.log)" --border 'double' \
+          --border-label="┨${PROG} - History┠" --color="${pwrfzf_colortheme}"
+      else
+        echo "emerge.log not found."
+        read -n1 -s
+      fi
+      ;;
+    *)
+      echo "Unknown history mode: $history_mode"
+      read -n1 -s
+      ;;
+  esac
 }
 
 # ------------------------------------------------------------------------------
@@ -560,7 +632,7 @@ readonly PREVIEW_CMD="if [[ -d {} ]]; then echo '=== DIRECTORY: {} ==='; echo '�
 function _portage_config_manager() {
   while true; do
     local mode
-    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse /etc/portage (Full Access)\n3. 📜 View Emerge History (Install/Uninstall)\n4. Back" | fzf \
+    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse /etc/portage (Full Access)\n3. 📜 View eLogs / Emerge History\n4. Back" | fzf \
       --header "Portage Management" \
       --border-label="┨${PROG} - Main Menu┠" \
       --border 'double' \
@@ -1231,18 +1303,21 @@ function _delete_config_file() {
 
 function _launch_editor() {
   local file_path="$1"
-  local editor
+  local editor="$PWRFZF_EDITOR"
   
-  if command -v nvim >/dev/null 2>&1; then editor="nvim"
-  elif command -v nano >/dev/null 2>&1; then editor="nano"
-  elif command -v vim >/dev/null 2>&1; then editor="vim"
-  elif command -v vi >/dev/null 2>&1; then editor="vi"
-  elif command -v gedit >/dev/null 2>&1; then editor="gedit"
-  elif command -v kate >/dev/null 2>&1; then editor="kate"
-  elif command -v leafpad >/dev/null 2>&1; then editor="leafpad"
-  else
-    _pwrfzf_error "No editor found! Please install nvim, nano, vim, or another editor."
-    return 1
+  # If the configured editor doesn't exist, fallback to robust detection
+  if ! command -v "$editor" >/dev/null 2>&1; then
+    if command -v nvim >/dev/null 2>&1; then editor="nvim"
+    elif command -v nano >/dev/null 2>&1; then editor="nano"
+    elif command -v vim >/dev/null 2>&1; then editor="vim"
+    elif command -v vi >/dev/null 2>&1; then editor="vi"
+    elif command -v gedit >/dev/null 2>&1; then editor="gedit"
+    elif command -v kate >/dev/null 2>&1; then editor="kate"
+    elif command -v leafpad >/dev/null 2>&1; then editor="leafpad"
+    else
+      _pwrfzf_error "No editor found! Please install nvim, nano, vim, or configure PWRFZF_EDITOR."
+      return 1
+    fi
   fi
   
   if [[ ! -f "$file_path" ]]; then
@@ -2152,7 +2227,7 @@ function main() {
     
     local skip_next=false
     for arg in "${temp_opts[@]}"; do
-      # Überspringe Argumente, die zu einem vorherigen gefilterten Flag gehören (z.B. virtual/*)
+      # Skip arguments that belong to a previously filtered flag (e.g. virtual/*)
       if [[ "$skip_next" == "true" ]]; then
         if [[ "$arg" == -* ]]; then
           skip_next=false
@@ -2161,7 +2236,7 @@ function main() {
         fi
       fi
       
-      # Filtere --buildpkg-exclude und seine Parameter komplett heraus
+      # Completely filter out --buildpkg-exclude and its parameters
       if [[ "$arg" == "--buildpkg-exclude" ]]; then
         skip_next=true
         continue
@@ -2170,7 +2245,7 @@ function main() {
         continue
       fi
       
-      # Sicherheitshalber: Filtere alle verwaisten Wildcards (*), die kein Flag sind
+      # Safety net: Filter out orphaned wildcards (*) that are not flags
       if [[ "$arg" == *\** && "$arg" != -* ]]; then
         continue
       fi
@@ -2192,8 +2267,6 @@ function main() {
       --sync) _sync_repositories; exit 0 ;;
       --preserved-rebuild) _preserved_rebuild; exit 0 ;;
       --depclean) ${EMERGE_CMD} -a --depclean; exit 0 ;;
-      __fzf_preview) __fzf_preview "$2"; exit 0 ;;
-      _show_emerge_history) _show_emerge_history; exit 0 ;;
       -*) BASE_EMERGE_ARGS+=("$1") ;;
       *) ARGS+=("$1") ;;
     esac
@@ -2250,7 +2323,7 @@ function main() {
         --bind "?:preview(echo '$(_pwrfzf_keys)')" \
         --bind "ctrl-h:preview(echo '$(_pwrfzf_keys)')" \
         --bind "change:first" \
-        --header 'Press ? for keys | Ctrl+o: Config | Ctrl+y: History | Ctrl+p: Installed | Ctrl+x: Depclean' \
+        --header 'Press ? for keys | Ctrl+o: Config | Ctrl+y: eLogs/History | Ctrl+p: Installed | Ctrl+x: Depclean' \
         --header-lines=1 \
         --preview-window "$PWRFZF_PREVIEW_WINDOW" \
         --history="$PWRFZF_HISTORY" \
@@ -2368,15 +2441,12 @@ function main() {
         esac
       done
       
-      # If list is empty after the menu, go back to standard search
       [[ ${#PKGS[@]} -eq 0 ]] && continue
     fi
     
     _install_packages_with_fallback "${emerge_args[@]}" "${PKGS[@]}"
     local install_result=$?
     
-    # Notice: install_result is currently 0 or 1. If we added internal retry exit codes, 
-    # it would catch them here. The internal loop handles most retries safely now.
     if [[ $install_result -eq 2 ]]; then
       echo "🔄 Configuration updated. Auto-retrying installation..."
       auto_retry=true
@@ -2394,34 +2464,21 @@ function main() {
 # ------------------------------------------------------------------------------
 # ENTRY POINT
 # ------------------------------------------------------------------------------
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  case "${1:-}" in
-    _config_preview)
-      _config_preview "$2"
-      exit 0
-      ;;
-    _action_preview)
-      _action_preview "$2" "$3"
-      exit 0
-      ;;
-    _sets_action_preview)
-      _sets_action_preview "$2"
-      exit 0
-      ;;
-    __fzf_preview)
-      __fzf_preview "$2"
-      exit 0
-      ;;
-    _show_emerge_history)
-      _show_emerge_history
-      exit 0
-      ;;
-    _toggle_installed)
-      _toggle_installed "$2"
-      exit 0
-      ;;
-  esac
-
-  _pwrfzf_init
-  main "$@"
-fi
+case "${1:-}" in
+  __fzf_preview)
+    __fzf_preview "$2"
+    exit 0
+    ;;
+  _config_preview|_action_preview|_sets_action_preview|_show_emerge_history|_toggle_installed)
+    # Load config in the subshell to ensure FZF binds inherit settings!
+    _load_config
+    _validate_config
+    _set_colors
+    "$1" "${@:2}"
+    exit 0
+    ;;
+  *)
+    _pwrfzf_init
+    main "$@"
+    ;;
+esac
