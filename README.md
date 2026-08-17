@@ -76,25 +76,13 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 - **📊 Real-time Preview** - Package info, USE flags, installed files, and config status
 - **🔄 Auto-Retry System** - Automatic retry with USE flag and keyword fixes
 - **🗑️ File Management** - Create, edit, and delete configuration files safely
-- **📝 Intelligent** logging system and smart config updating mechanism
-- **🔧 Smart package** installation with fallback analysis
-
-## 📸 Screenshots
-| Package Search | Installation | Config Management |
-| :------------: | :----------: | :---------------: |
-| ![Search](assets/demo-screenshot.png) | ![Install](assets/demo-screenshot2.png) | ![Config](assets/demo-screenshot3.png) |
-| *Fuzzy search* | *Smart install* | *Portage config* |
-
-| USE Flag Management | File Operations |
-| :-----------------: | :-------------: |
-| ![Flags](assets/demo-screenshot4.png) | ![Files](assets/demo-screenshot5.png) |
-| *Interactive USE* | *File browser* |
+- **📝 Intelligent** logging system and smart config updating mechanism.
 
 ## Quick Install
 ```bash
-git clone https://github.com/spikyatlinux/pwrfzf.git
-or from mirror
-git clone https://git.mysusi.org/spikyatlinux/pwrfzf.git
+git clone [https://github.com/spikyatlinux/pwrfzf.git](https://github.com/spikyatlinux/pwrfzf.git)
+# or from mirror
+# git clone [https://git.mysusi.org/spikyatlinux/pwrfzf.git](https://git.mysusi.org/spikyatlinux/pwrfzf.git)
 cd pwrfzf
 sudo cp -v ./bin/pwrfzf /usr/local/bin/
 ```
@@ -134,7 +122,7 @@ pwrfzf -V
 
 ## Configuration file `~/.config/pwrfzf/pwrfzf-config`
 
-The configuration file is automatically generated and updated with new variables on startup.
+The configuration file is automatically generated and updated with new variables on startup. You can also edit it live from the `pwrfzf -c` menu.
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -245,41 +233,7 @@ This project is licensed under the GNU General Public License v3.0 - see the LIC
 
 ---
 
-### 📝 Changelog
-
-#### Version 2.3
-**✨ New Features:**
-* **Advanced eLog Viewer (`elogfzf`):** Added a powerful built-in interactive viewer for `/var/log/portage/elog`. Features live previews (with `bat` syntax highlighting if available), deleting single logs (`F2`), and wiping all logs (`F3`).
-* **`elogv` Support:** Added support for the official `app-portage/elogv` tool as an alternative history backend.
-* **Configurable Editor:** Introduced the `PWRFZF_EDITOR` variable in the configuration file to enforce a specific editor (like `nano` or `kate`) independently from your system's `$EDITOR` variable.
-
-**🚀 Improvements:**
-* **Robust Wrapper Compatibility:** Replaced the fragile `$0` vs `BASH_SOURCE` entry-point check with a bulletproof `case` fallback. The script now starts flawlessly even when executed through complex Wayland/X11 terminal wrappers (like `polyterm` on Sway/i3).
-* **Reliable Subshell Configurations:** FZF subshells triggered by keybindings (like `Ctrl-y` or `Ctrl-p`) now correctly inherit the updated `pwrfzf-config` instead of falling back to default values.
-
-**🐛 Bug Fixes:**
-* **Editor TTY Fix:** Resolved an issue where pressing `Enter` to open an eLog file in an editor would fail or close instantly. `fzf` now returns the file path to the main loop, leveraging the robust `_launch_editor` function.
-* **Scrolling Fix:** Removed the explicit `wheel-up` FZF bindings to prevent `unsupported key` errors, allowing native FZF mouse scrolling to work out-of-the-box.
-
-#### Version 2.2
-**✨ New Features:**
-* **Emerge History Viewer (`Ctrl-y`):** Added a history tracking tool that parses your unmerge/merge history. Supports `genlop`, `qlop`, or raw `/var/log/emerge.log` files.
-* **System Depclean (`Ctrl-x`):** Added a global shortcut and a CLI argument (`--depclean`) to trigger `emerge -a --depclean` instantly.
-* **Toggle Installed Packages (`Ctrl-p`):** Seamlessly toggle the live search list between *all* packages and *installed* packages only.
-* **Interactive Installation Options:** The confirmation screen now features advanced live-editing capabilities (`[o]` oneshot, `[d]` depclean, `[e]` edit args, `[r]` remove packages, `[s]` save to set).
-* **Smart Config Updater:** `pwrfzf-config` now features a smart-append mechanism for non-destructive updates.
-* **Search Customization:** Added `PWRFZF_EXACT_SEARCH` and `PWRFZF_SEARCH_NAMES_ONLY`.
-* **Top-Down Layout Default:** Implemented `PWRFZF_FZF_LAYOUT="reverse"` for a modern, top-down search experience.
-
-**🚀 Improvements:**
-* **Native FZF File Viewer:** Replaced `less -R` with a custom FZF-based file pager.
-* **Directory Previews:** The Config Explorer now detects directories on-the-fly and runs a colored `ls -lh`.
-* **Smarter Argument Parsing:** Implemented a robust filter that actively ignores complex `make.conf` arguments like `--buildpkg-exclude */*` before they hit the editor prompt.
-
-**🐛 Bug Fixes:**
-* Fixed an issue where `Ctrl-r` (Unmerge) would fail if the package name from FZF contained trailing colons.
-* Fixed an array accumulation bug where aborted installations would endlessly duplicate packages and arguments.
-* Fixed the `Ctrl-i` keybinding (changed `toggle-all` to `toggle`).
+### [📝 View Full Changelog](Changelog)
 
 <div align="center">
 Made with ❤️ for the Gentoo community
