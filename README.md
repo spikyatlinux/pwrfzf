@@ -78,6 +78,17 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 - **🗑️ File Management** - Create, edit, and delete configuration files safely
 - **📝 Intelligent** logging system and smart config updating mechanism.
 
+## 📸 Screenshots
+| Package Search | Installation | Config Management |
+| :------------: | :----------: | :---------------: |
+| ![Search](assets/demo-screenshot.png) | ![Install](assets/demo-screenshot2.png) | ![Config](assets/demo-screenshot3.png) |
+| *Fuzzy search* | *Smart install* | *Portage config* |
+
+| USE Flag Management | File Operations |
+| :-----------------: | :-------------: |
+| ![Flags](assets/demo-screenshot4.png) | ![Files](assets/demo-screenshot5.png) |
+| *Interactive USE* | *File browser* |
+
 ## Quick Install
 ```bash
 git clone [https://github.com/spikyatlinux/pwrfzf.git](https://github.com/spikyatlinux/pwrfzf.git)
