@@ -1,4 +1,13 @@
 # Changelog
+## [2.4-r1] - 2026-08-18
+### Added
+- **Live Config Editor:** Added a new option "⚙️ Edit pwrfzf Config" to the main Portage Configuration menu (`Ctrl-o`).
+- **Live-Reloading:** Editing the configuration from within the tool automatically reloads settings (like colors, layout, and preferred editor) instantly upon saving, without requiring a restart.
+
+### Fixed
+- **Terminal Hijack Bug:** Removed global `exec` stdout redirection that caused terminal UI corruption and leaked ANSI escape sequences into the log file. Logging is now handled cleanly.
+- **GUI Editor Crash:** Removed the `script` pseudo-terminal wrapper that prevented GUI text editors (like `kate`, `gedit`) from launching correctly.
+- **Wrapper Compatibility:** Switched the entry-point execution check from a `$0` vs `BASH_SOURCE` string comparison to a robust `case` fallback. The script now launches perfectly from Window Manager keybinds and terminal wrappers like `polyterm`.
 
 ## [2.4] - 2026-08-17
 ### Added

@@ -85,16 +85,15 @@ function _setup_logging() {
   if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
     local log_file="${PWRFZF_CONFIG_DIR}/pwrfzf.log"
     mkdir -p "$(dirname "$log_file")"
-    
-    # Strip ANSI color codes for clean log files
-    function _strip_ansi() {
-      sed -E 's/\x1B\[[0-9;]*[mGK]//g'
-    }
-    
-    exec > >(tee >(_strip_ansi >> "$log_file"))
-    exec 2> >(tee >(_strip_ansi >> "$log_file") >&2)
-    
-    _pwrfzf_verbose "Logging enabled: $log_file"
+    touch "$log_file" 2>/dev/null
+    _pwrfzf_log "--- PWRFZF Started (Version $PWRFZF_VERSION) ---"
+  fi
+}
+
+function _pwrfzf_log() {
+  if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
+    local log_file="${PWRFZF_CONFIG_DIR}/pwrfzf.log"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" >> "$log_file"
   fi
 }
 
@@ -385,18 +384,22 @@ function _print_divider() {
 
 function _pwrfzf_error() {
   printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+  _pwrfzf_log "ERROR: $*"
 }
 
 function _pwrfzf_warning() {
   printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Yellow]}${pwrfzf_color[Black]} WARNING ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Yellow]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+  _pwrfzf_log "WARNING: $*"
 }
 
 function _pwrfzf_verbose() {
   printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@"
+  _pwrfzf_log "VERBOSE: $*"
 }
 
 function _pwrfzf_success() {
   printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Green]}${pwrfzf_color[Black]} SUCCESS ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Green]}%s${pwrfzf_color[Reset]}\n" "$@"
+  _pwrfzf_log "SUCCESS: $*"
 }
 
 function _fzf_viewer() {
@@ -573,6 +576,8 @@ function _show_emerge_history() {
         [[ -z "$log_files" ]] && { echo "No eLog files found."; sleep 1; break; }
 
         local selected
+        # 💥 CRITICAL FIX: Removed --bind "enter:execute(...)"
+        # Now FZF properly closes, returns the file to Bash, and we open it robustly via _launch_editor
         selected=$(echo "$log_files" | fzf \
           --preview "$bat_cmd {} 2>/dev/null || cat {}" \
           --preview-window="right:60%:wrap:follow" \
@@ -1330,18 +1335,11 @@ function _launch_editor() {
     ${PRIV_ESC} touch "$file_path"
   fi
   
-  if command -v script >/dev/null 2>&1; then
-    if [[ $EUID -eq 0 ]]; then
-      script -q -c "$editor '$file_path'" /dev/null
-    else
-      script -q -c "${PRIV_ESC} $editor '$file_path'" /dev/null
-    fi
+  # Launch directly. GUI editors handle this natively without breaking the terminal.
+  if [[ $EUID -eq 0 ]]; then
+    $editor "$file_path" < /dev/tty
   else
-    if [[ $EUID -eq 0 ]]; then
-      $editor "$file_path"
-    else
-      ${PRIV_ESC} $editor "$file_path"
-    fi
+    ${PRIV_ESC} $editor "$file_path" < /dev/tty
   fi
   
   tput reset 2>/dev/null || true

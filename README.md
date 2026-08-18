@@ -72,6 +72,7 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 - **📜 Emerge History & eLogs** - Built-in history viewer tracking recently installed/uninstalled packages (`genlop`/`qlop`) and an interactive `elog` viewer.
 - **🎨 Beautiful Interface** - Custom color themes with full Unicode support and borders
 - **🔧 Complete Portage Config Manager** - Manage ALL Portage configuration files, including a full `/etc/portage` directory explorer.
+- **⚙️ Live Config Editor** - Edit your `pwrfzf` settings directly from the TUI with instant hot-reloading.
 - **🛡️ Safe Operations** - Confirmation prompts, live emerge argument editing, and automatic configuration fixes
 - **📊 Real-time Preview** - Package info, USE flags, installed files, and config status
 - **🔄 Auto-Retry System** - Automatic retry with USE flag and keyword fixes
