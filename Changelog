@@ -1,4 +1,10 @@
 # Changelog
+
+## [2.5] - 2026-08-18
+### Added
+- **Exit Confirmation:** Added a new configuration variable `PWRFZF_CONFIRM_EXIT` (default: `true`). When aborting the main search interface (via `ESC` or `Ctrl-q`), the tool will now ask for confirmation before closing, preventing accidental exits.
+
+
 ## [2.4-r1] - 2026-08-18
 ### Added
 - **Live Config Editor:** Added a new option "⚙️ Edit pwrfzf Config" to the main Portage Configuration menu (`Ctrl-o`).

@@ -20,7 +20,7 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.4"
+readonly PWRFZF_VERSION="2.5"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
@@ -41,6 +41,7 @@ PWRFZF_PREVIEW_WINDOW="${PWRFZF_PREVIEW_WINDOW:-right,60%,border-left}"
 PWRFZF_SHOW_INSTALLED="${PWRFZF_SHOW_INSTALLED:-true}"
 PWRFZF_AUTO_SYNC="${PWRFZF_AUTO_SYNC:-false}"
 PWRFZF_CONFIRM_ACTIONS="${PWRFZF_CONFIRM_ACTIONS:-true}"
+PWRFZF_CONFIRM_EXIT="${PWRFZF_CONFIRM_EXIT:-true}"
 PWRFZF_MAX_PREVIEW_LINES="${PWRFZF_MAX_PREVIEW_LINES:-50}"
 PWRFZF_LOGGING="${PWRFZF_LOGGING:-false}"
 PWRFZF_HISTORY_CMD="${PWRFZF_HISTORY_CMD:-elogv}"
@@ -155,6 +156,9 @@ function _update_config() {
 
   # --- Append new configuration variables here ---
 
+  _append_if_missing "PWRFZF_CONFIRM_EXIT" "# Confirm before exiting the application
+PWRFZF_CONFIRM_EXIT=true"
+
   _append_if_missing "PWRFZF_FZF_LAYOUT" "# FZF Layout (reverse = top-down, default = bottom-up)
 PWRFZF_FZF_LAYOUT=\"reverse\""
 
@@ -200,6 +204,10 @@ function _validate_config() {
     PWRFZF_LOGGING="false"
   fi
 
+  if [[ "$PWRFZF_CONFIRM_EXIT" != "true" && "$PWRFZF_CONFIRM_EXIT" != "false" ]]; then
+    PWRFZF_CONFIRM_EXIT="true"
+  fi
+
   if [[ "$PWRFZF_FZF_LAYOUT" != "reverse" && "$PWRFZF_FZF_LAYOUT" != "default" && "$PWRFZF_FZF_LAYOUT" != "reverse-list" ]]; then
     PWRFZF_FZF_LAYOUT="reverse"
   fi
@@ -235,6 +243,7 @@ NO_FX=false
 PWRFZF_SHOW_INSTALLED=true
 PWRFZF_AUTO_SYNC=false
 PWRFZF_CONFIRM_ACTIONS=true
+PWRFZF_CONFIRM_EXIT=true
 PWRFZF_MAX_PREVIEW_LINES=50
 PWRFZF_LOGGING=true
 
@@ -2350,9 +2359,23 @@ function main() {
           PICKS+=("$line")
         done
       
-      [[ ${#PICKS[@]} -eq 0 ]] && exit 0
+      # Exit logic: Check if we cancelled FZF
+      if [[ ${#PICKS[@]} -eq 0 ]]; then
+        if [[ "${PWRFZF_CONFIRM_EXIT}" == "true" ]]; then
+          echo
+          _print_divider
+          read -rp "Exit PWRFZF? (Y/n): " exit_ans
+          if [[ -z "$exit_ans" || "$exit_ans" =~ ^[Yy]$ ]]; then
+            exit 0
+          else
+            continue
+          fi
+        else
+          exit 0
+        fi
+      fi
       
-      # 💥 CRITICAL FIX: Safe Regex Package Extraction 
+      # Safe Regex Package Extraction 
       # Guarantees only the pure package name passes to emerge, sans spaces or colons.
       for PICK in "${PICKS[@]}"; do
         local atom="${PICK%% *}" # Grab first word before space

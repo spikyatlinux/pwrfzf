@@ -143,6 +143,7 @@ The configuration file is automatically generated and updated with new variables
 | `PWRFZF_SHOW_INSTALLED` | Show installed packages in search results | `true` |
 | `PWRFZF_AUTO_SYNC` | Auto-sync repositories before operations | `false` |
 | `PWRFZF_CONFIRM_ACTIONS` | Confirm before installation/removal | `true` |
+| `PWRFZF_CONFIRM_EXIT` | Ask for confirmation before closing the app | `true` |
 | `PWRFZF_MAX_PREVIEW_LINES` | Maximum lines in package preview window | `50` |
 | `PWRFZF_LOGGING` | Enable logging to file | `false` |
 | `PWRFZF_FZF_LAYOUT` | Set FZF layout (`reverse` for top-down, `default` for bottom-up) | `"reverse"` |
