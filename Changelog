@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.6] - 2026-08-22
+### Added
+- **Dynamic Portage Paths (`portageq`):** Eliminated hardcoded paths. The script now dynamically fetches `PORTAGE_CONFIGROOT`, `PORT_LOGDIR`, `EMERGE_LOG_DIR`, `DISTDIR`, `PKGDIR`, and the primary Gentoo repository path using native `portageq` commands.
+- **Gentoo Prefix Compatibility:** By parsing all paths dynamically, `pwrfzf` is now fully compliant with custom Gentoo Prefix installations and non-standard `make.conf` configurations.
+
 ## [2.5] - 2026-08-18
 ### Added
 - **Exit Confirmation:** Added a new configuration variable `PWRFZF_CONFIRM_EXIT` (default: `true`). When aborting the main search interface (via `ESC` or `Ctrl-q`), the tool will now ask for confirmation before closing, preventing accidental exits.

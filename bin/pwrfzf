@@ -18,15 +18,38 @@ if [ -n "$BASH_VERSION" ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# CONSTANTS & GLOBALS
+# CONSTANTS & GLOBALS (DYNAMIC PORTAGEQ EXTRACTION)
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.5"
+readonly PWRFZF_VERSION="2.6"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
-readonly PORTAGE_ETC="/etc/portage"
-readonly ELOG_DIR="/var/log/portage/elog"
-readonly EMERGE_LOG="/var/log/emerge.log"
+
+# Dynamically extract Portage paths via portageq (with sane defaults)
+if command -v portageq >/dev/null 2>&1; then
+  # Read basic variables in a single call for maximum performance
+  mapfile -t _pq < <(portageq envvar PORTAGE_CONFIGROOT PORT_LOGDIR EMERGE_LOG_DIR 2>/dev/null)
+  _P_ROOT="${_pq[0]:-/}"
+  _P_LOG="${_pq[1]:-/var/log/portage}"
+  _E_LOG="${_pq[2]:-/var/log}"
+  
+  readonly PORTAGE_ETC="${_P_ROOT%/}/etc/portage"
+  readonly ELOG_DIR="${_P_LOG%/}/elog"
+  readonly EMERGE_LOG="${_E_LOG%/}/emerge.log"
+  
+  # Use dedicated portageq commands for specific directories
+  readonly DISTDIR="$(portageq distdir 2>/dev/null || echo "${_P_ROOT%/}/var/cache/distfiles")"
+  readonly PKGDIR="$(portageq pkgdir 2>/dev/null || echo "${_P_ROOT%/}/var/cache/binpkgs")"
+  readonly GENTOO_REPO="$(portageq get_repo_path / gentoo 2>/dev/null || echo "${_P_ROOT%/}/var/db/repos/gentoo")"
+else
+  # Fallback to standard Gentoo paths if portageq is missing
+  readonly PORTAGE_ETC="/etc/portage"
+  readonly ELOG_DIR="/var/log/portage/elog"
+  readonly EMERGE_LOG="/var/log/emerge.log"
+  readonly DISTDIR="/var/cache/distfiles"
+  readonly PKGDIR="/var/cache/binpkgs"
+  readonly GENTOO_REPO="/var/db/repos/gentoo"
+fi
 
 # Configuration directories
 PWRFZF_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/${PROG}"
@@ -344,6 +367,18 @@ function _load_emerge_default_opts() {
     return
   fi
   
+  # Try to safely extract EMERGE_DEFAULT_OPTS via portageq directly
+  if command -v portageq >/dev/null 2>&1; then
+    local env_opts
+    env_opts=$(portageq envvar EMERGE_DEFAULT_OPTS 2>/dev/null)
+    if [[ -n "$env_opts" ]]; then
+      EMERGE_DEFAULT_OPTS="$env_opts"
+      _pwrfzf_verbose "Loaded EMERGE_DEFAULT_OPTS via portageq: $EMERGE_DEFAULT_OPTS"
+      return
+    fi
+  fi
+  
+  # Fallback manual extraction
   local sourced_opts
   if [[ -f "${PORTAGE_ETC}/make.conf" ]]; then
     sourced_opts=$(source "${PORTAGE_ETC}/make.conf" 2>/dev/null; echo "$EMERGE_DEFAULT_OPTS")
@@ -585,8 +620,7 @@ function _show_emerge_history() {
         [[ -z "$log_files" ]] && { echo "No eLog files found."; sleep 1; break; }
 
         local selected
-        # 💥 CRITICAL FIX: Removed --bind "enter:execute(...)"
-        # Now FZF properly closes, returns the file to Bash, and we open it robustly via _launch_editor
+        # FZF cleanly closes and returns the path to Bash
         selected=$(echo "$log_files" | fzf \
           --preview "$bat_cmd {} 2>/dev/null || cat {}" \
           --preview-window="right:60%:wrap:follow" \
@@ -644,7 +678,7 @@ readonly PREVIEW_CMD="if [[ -d {} ]]; then echo '=== DIRECTORY: {} ==='; echo '�
 function _portage_config_manager() {
   while true; do
     local mode
-    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse /etc/portage (Full Access)\n3. 📜 View eLogs / Emerge History\n4. ⚙️  Edit pwrfzf Config\n5. Back" | fzf \
+    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse Config Directory\n3. 📜 View eLogs / Emerge History\n4. ⚙️  Edit pwrfzf Config\n5. Back" | fzf \
       --header "Portage Management" \
       --border-label="┨${PROG} - Main Menu┠" \
       --border 'double' \
@@ -670,7 +704,7 @@ function _file_browser() {
   while true; do
     local selected_file
     selected_file=$(find "${PORTAGE_ETC}" -mindepth 1 2>/dev/null | fzf \
-      --header "Browse /etc/portage (Enter=Action, ESC=Back)" \
+      --header "Browse Configuration (Enter=Action, ESC=Back)" \
       --preview-window 'right,60%,border-left' \
       --preview "$PREVIEW_CMD" \
       --border 'double' \
