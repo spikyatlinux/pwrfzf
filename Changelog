@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.7] - 2026-08-22
+### Added
+- **Dynamic Portage Paths (`portageq`):** Eliminated hardcoded paths. The script now dynamically fetches `PORTAGE_CONFIGROOT`, `PORT_LOGDIR`, `EMERGE_LOG_DIR`, `DISTDIR`, `PKGDIR`, and the primary Gentoo repository path using native `portageq` commands, ensuring full compatibility with Gentoo Prefix and custom `make.conf` setups.
+- **Config Updater Integration:** Added a new configuration variable `PWRFZF_CONFIG_UPDATER` (defaults to `cfg-update -u`). You can now run system config merges directly via the main menu or by pressing `Alt-u`.
+- **Live Config Editor:** Added a new option "⚙️ Edit pwrfzf.conf" to the main Portage Configuration menu (`Ctrl-o`). Editing the configuration from within the tool automatically reloads settings instantly upon saving.
+- **Advanced eLog Viewer (`elogfzf`):** Added a powerful built-in interactive viewer for `/var/log/portage/elog`. Features live previews, deleting single logs (`F2`), and wiping all logs (`F3`).
+- **Exit Confirmation:** Added `PWRFZF_CONFIRM_EXIT` (default: `true`) to prevent accidental closures when hitting `ESC` or `Ctrl-q` in the main menu.
+- **Extended Configuration:** Exposed `PWRFZF_EDITOR`, `PWRFZF_COLOR_THEME`, and `PWRFZF_EMERGE_CMD` to the configuration file for ultimate customizability.
+
+### Changed
+- **Config File Extension:** Renamed the config file from `pwrfzf-config` to `pwrfzf.conf`. The script will automatically detect and migrate older configuration files without losing settings.
+- **Default History Tool:** Set the default history backend to `elogv` (can be changed to `elogfzf`, `genlop`, `qlop`, etc. in `pwrfzf.conf`).
+
+### Fixed
+- **Terminal Hijack Bug:** Removed global `exec` stdout redirection that caused terminal UI corruption and leaked ANSI escape sequences into the log file.
+- **GUI Editor Crash:** Removed the `script` pseudo-terminal wrapper that prevented GUI text editors (like `kate` or `gedit`) from launching correctly. FZF now safely returns the file path to the main loop.
+- **FZF Quoting Bug:** Fixed an issue where file operations in the eLog viewer failed due to improperly quoted `{}` FZF placeholders.
+- **Wrapper Compatibility:** Switched the entry-point execution check to a robust `case` fallback. The script now launches perfectly from Window Manager keybinds and terminal wrappers like `polyterm`.
+- **Removed `-l` Flag:** Removed the `--last-merge` argument to streamline the code and rely on the robust `Ctrl-y` history viewer instead.
+
 ## [2.6] - 2026-08-22
 ### Added
 - **Dynamic Portage Paths (`portageq`):** Eliminated hardcoded paths. The script now dynamically fetches `PORTAGE_CONFIGROOT`, `PORT_LOGDIR`, `EMERGE_LOG_DIR`, `DISTDIR`, `PKGDIR`, and the primary Gentoo repository path using native `portageq` commands.
