@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.8.1] - 2026-08-23
+### Added
+- **Failed Build Log Viewer:** Added a smart log viewer (`_recent_build_logs_viewer`) that scans `/var/log/portage/` specifically for failed builds (filtering by `* ERROR:`). 
+- **Post-Failure Diagnostics:** If a package installation or world update fails due to compilation errors, the script now actively prompts you to open the failed build log viewer to investigate the issue immediately.
+
+### Changed
+- **World Update Manager:** Refactored the `Ctrl-w` (World Update) keybind into a dedicated, robust function (`_world_update`) that neatly separates syncing, updating, and error handling.
+- **Wait-States for Actions:** FZF action keybinds (`Ctrl-w`, `Ctrl-x`, `Ctrl-s`, `Ctrl-z`) now cleanly pause at the end (`Press any key to return...`) instead of instantly throwing you back into the TUI, giving you time to read the output.
+
+### Fixed
+- **Subshell Command Bug:** Fixed a critical issue where executing background shortcuts (like `Ctrl-w`) resulted in "command not found" errors (e.g., `-avuDN`). The variables for `EMERGE_CMD` and `sudo` are now properly re-initialized when FZF spawns a subshell.
+
+
 ## [2.8] - 2026-08-23
 ### Added
 - **Gentoo News Integration:** Added a fully interactive News Reader (`eselect news`) to the management menu. Features live previews, reading (Enter), marking as read (F2), unread (F3), and purging (F4).

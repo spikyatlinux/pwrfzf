@@ -20,7 +20,7 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS (DYNAMIC PORTAGEQ EXTRACTION)
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.8"
+readonly PWRFZF_VERSION="2.8.1"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
@@ -776,6 +776,55 @@ function _elogfzf_viewer() {
     [[ -z "$selected" ]] && break
     
     # Launch editor natively in the main loop to avoid subshell issues
+    _launch_editor "$selected"
+  done
+}
+
+function _recent_build_logs_viewer() {
+  local log_dir="${_P_LOG:-/var/log/portage}"
+  if ! ${PRIV_ESC} test -d "$log_dir"; then
+    echo "Log directory not found at $log_dir"
+    read -n1 -s < /dev/tty
+    return
+  fi
+
+  local bat_cmd="cat"
+  command -v bat >/dev/null 2>&1 && bat_cmd="bat --style=plain --color=always"
+
+  # Portage either puts logs in /var/log/portage or /var/log/portage/build (if split-log is enabled)
+  local search_paths=("$log_dir")
+  if ${PRIV_ESC} test -d "$log_dir/build"; then
+    search_paths+=("$log_dir/build")
+  fi
+
+  while true; do
+    local log_files=""
+    
+    # 1. Find all .log files in the dirs
+    # 2. Sort by time (newest first)
+    # 3. Take the last 200 to keep it fast
+    # 4. Grep for " * ERROR: " which is the standard Gentoo phase failure marker
+    log_files=$(${PRIV_ESC} find "${search_paths[@]}" -type f -name "*.log" -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 200 | cut -d' ' -f2- | ${PRIV_ESC} xargs -d '\n' -r grep -l -m 1 " \* ERROR: " 2>/dev/null)
+
+    if [[ -z "$log_files" ]]; then
+      echo "✅ No failed build logs found in the recent history."
+      read -n1 -rsp "Press any key to return..." < /dev/tty
+      break
+    fi
+
+    local reload_cmd="${PRIV_ESC} find \"${search_paths[@]}\" -type f -name \"*.log\" -printf \"%T@ %p\n\" 2>/dev/null | sort -nr | head -n 200 | cut -d\" \" -f2- | ${PRIV_ESC} xargs -d '\n' -r grep -l -m 1 \" \\* ERROR: \" 2>/dev/null"
+
+    local selected
+    selected=$(echo "$log_files" | fzf \
+      --preview "${PRIV_ESC} $bat_cmd {} 2>/dev/null || ${PRIV_ESC} cat {}" \
+      --preview-window="right:60%:wrap:follow" \
+      --bind "f2:execute(${PRIV_ESC} rm -i {})+reload($reload_cmd)" \
+      --bind "pgup:preview-up,pgdn:preview-down,ctrl-u:preview-up,ctrl-d:preview-down" \
+      --header "ENTER: open | F2: delete log | ESC: return" \
+      --border 'double' --border-label="┨${PROG} - Failed Build Logs┠" --color="${pwrfzf_colortheme}")
+    
+    [[ -z "$selected" ]] && break
+    
     _launch_editor "$selected"
   done
 }
@@ -1858,21 +1907,38 @@ function _add_package_set() {
 # ------------------------------------------------------------------------------
 # EMERGE WRAPPERS & ACTIONS
 # ------------------------------------------------------------------------------
-function _sync_repositories() {
-  _pwrfzf_verbose "Syncing repositories..."
-  if ${PRIV_ESC} emaint sync --all; then
-    _pwrfzf_success "Repositories synced successfully"
-  else
-    _pwrfzf_error "Failed to sync repositories"
-  fi
-}
+function _world_update() {
+  tput clear 2>/dev/null || clear
+  _print_divider
+  echo "🌍 Starting World Update"
+  _print_divider
 
-function _preserved_rebuild() {
-  _pwrfzf_verbose "Running preserved rebuild..."
-  if ${EMERGE_CMD} -1 @preserved-rebuild; then
-    _pwrfzf_success "Preserved rebuild completed successfully"
+  echo ">>> Syncing repositories..."
+  if ${PRIV_ESC} emaint sync -a < /dev/tty; then
+    _pwrfzf_success "Repositories synced successfully."
   else
-    _pwrfzf_error "Preserved rebuild failed"
+    _pwrfzf_warning "Repository sync had issues. Proceeding anyway..."
+  fi
+
+  echo
+  _print_divider
+  echo ">>> Calculating updates..."
+  ${EMERGE_CMD} -avuDN @world < /dev/tty
+  local exit_code=$?
+
+  echo
+  _print_divider
+  if [[ $exit_code -eq 0 ]]; then
+    _pwrfzf_success "World update completed successfully!"
+    read -n1 -rsp "Press any key to return..." < /dev/tty
+  else
+    _pwrfzf_error "World update failed or was cancelled (Exit code: $exit_code)."
+    echo
+    read -n1 -rp "Would you like to view failed build logs to investigate? (y/N) " ans < /dev/tty
+    echo
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      _recent_build_logs_viewer
+    fi
   fi
 }
 
@@ -2073,7 +2139,14 @@ function _install_packages_with_fallback() {
             ;;
         esac
       else
-        echo "❌ Unknown installation error. Pretend passed but install failed."
+        echo "❌ Compilation or runtime error detected (Pretend passed but install failed)."
+        echo
+        read -n1 -rp "Would you like to view the failed build logs to investigate? (y/N) " ans < /dev/tty
+        echo
+        if [[ "$ans" =~ ^[Yy]$ ]]; then
+          _recent_build_logs_viewer
+        fi
+
         if [[ $retry_count -lt $max_retries ]]; then
           echo "🔄 Retrying..."
           continue
@@ -2244,7 +2317,7 @@ function _add_use_flags_interactive() {
   echo "Add USE flags for: $package"
   
   local edited_package
-  read -e -i "$package" -p "Edit package atom (e.g. append ::repo): " edited_package
+  read -e -i "$package" -p "Edit package atom: " edited_package
   [[ -z "$edited_package" ]] && return 1
   package="$edited_package"
   
@@ -2317,9 +2390,13 @@ function _add_use_flags_interactive() {
     # Ensure trailing newline safely before appending
     ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
     
-    echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
-    _pwrfzf_success "Added to $config_file: $use_entry"
-    return 0
+    if echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null; then
+      _pwrfzf_success "Added to $config_file: $use_entry"
+      return 0
+    else
+      _pwrfzf_error "Failed to write to $config_file"
+      return 1
+    fi
   else
     _pwrfzf_warning "Cancelled"
     return 1
@@ -2580,11 +2657,11 @@ function main() {
       auto_retry=false
     else
       __emerge_list "$SearchInput" | fzf "${fzf_search_opts[@]}" \
-        --bind "ctrl-r:execute:pkgs=\$(echo {+1} | tr -d ':'); [[ -n \"\$pkgs\" ]] && ${EMERGE_CMD} -aC \$pkgs" \
-        --bind "ctrl-x:execute:${EMERGE_CMD} -a --depclean" \
-        --bind "ctrl-w:execute:${PRIV_ESC} emaint sync -a && ${EMERGE_CMD} -avuDN @world" \
-        --bind "ctrl-z:execute:${EMERGE_CMD} -1 @preserved-rebuild" \
-        --bind "ctrl-s:execute:${PRIV_ESC} emaint sync -a" \
+        --bind "ctrl-r:execute(pkgs=\$(echo {+1} | tr -d ':'); [[ -n \"\$pkgs\" ]] && ${EMERGE_CMD} -aC \$pkgs < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
+        --bind "ctrl-x:execute(${EMERGE_CMD} -a --depclean < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
+        --bind "ctrl-w:execute(${BASH_SOURCE[0]} _world_update)" \
+        --bind "ctrl-z:execute(${EMERGE_CMD} -1 @preserved-rebuild < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
+        --bind "ctrl-s:execute(${PRIV_ESC} emaint sync -a < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
         --bind "ctrl-o:execute:${BASH_SOURCE[0]} -c" \
         --bind "alt-u:execute(${BASH_SOURCE[0]} _run_config_updater)" \
         --bind "ctrl-y:execute(${BASH_SOURCE[0]} _show_emerge_history)" \
@@ -2769,11 +2846,13 @@ case "${1:-}" in
     __fzf_preview "$2"
     exit 0
     ;;
-  _config_preview|_action_preview|_sets_action_preview|_show_emerge_history|_toggle_installed|_run_config_updater)
+  _config_preview|_action_preview|_sets_action_preview|_show_emerge_history|_toggle_installed|_run_config_updater|_world_update)
     # Load config in the subshell to ensure FZF binds inherit settings!
     _load_config
     _validate_config
     _set_colors
+    _find_privilege_escalator
+    _find_emerge
     "$1" "${@:2}"
     exit 0
     ;;
