@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.8.2] - 2026-08-23
+### Added
+- **Dynamic GLSA Dashboard:** The Security Advisory viewer now opens by default even if the system is secure. Added `Ctrl-a` to dynamically toggle between "affected" and "all" historic GLSAs.
+- **GLSA Ignore/Inject:** Added `F3` action in the GLSA viewer to manually inject/ignore specific advisories (e.g., false positives).
+- **Chronological Sorting:** GLSAs are now sorted newest-first by default. This can be controlled via the new `PWRFZF_GLSA_REVERSE=true` setting in `pwrfzf.conf`.
+
+### Fixed
+- **GLSA Blank List Bug:** Fixed an issue where ANSI color codes from `glsa-check` broke the FZF list generation. Forced `--nocolor` (`-n`) for clean data pipes.
+- **GLSA Column Parsing:** Fixed preview and execute bindings failing to parse the correct GLSA ID (shifted from `{2}` to `{1}`).
+- **TUI Corruption (Stdout Pollution):** Fixed a critical bug where `VERBOSE` logging messages leaked into FZF's data pipes, corrupting the UI. All script status outputs are now strictly isolated to `stderr` (`>&2`).
+- **Subshell Execution & Sudo:** Fixed missing privileges and `$PATH` confusion in FZF background processes by strictly enforcing absolute script paths (`realpath`) and ensuring `sudo` pre-authentication.
+
+
 ## [2.8.1] - 2026-08-23
 ### Added
 - **Failed Build Log Viewer:** Added a smart log viewer (`_recent_build_logs_viewer`) that scans `/var/log/portage/` specifically for failed builds (filtering by `* ERROR:`). 

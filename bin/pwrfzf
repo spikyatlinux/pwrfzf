@@ -20,7 +20,7 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS (DYNAMIC PORTAGEQ EXTRACTION)
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.8.1"
+readonly PWRFZF_VERSION="2.8.2"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
@@ -76,6 +76,7 @@ PWRFZF_EDITOR="${PWRFZF_EDITOR:-}"
 PWRFZF_CONFIG_UPDATER="${PWRFZF_CONFIG_UPDATER:-cfg-update -u}"
 PWRFZF_EMERGE_CMD="${PWRFZF_EMERGE_CMD:-emerge}"
 PWRFZF_COLOR_THEME="${PWRFZF_COLOR_THEME:-}"
+PWRFZF_GLSA_REVERSE="${PWRFZF_GLSA_REVERSE:-true}"
 
 declare -g PWRFZF_MODE="packages"
 declare -g PWRFZF_LAYOUT="default"
@@ -224,8 +225,10 @@ PWRFZF_EMERGE_CMD=\"emerge\""
   _append_if_missing "PWRFZF_COLOR_THEME" "# Custom FZF color theme string. Leave empty for default.
 PWRFZF_COLOR_THEME=\"\""
 
+  _append_if_missing "PWRFZF_GLSA_REVERSE" "# GLSA sorting: true = newest first, false = oldest first
+PWRFZF_GLSA_REVERSE=true"
+
   if [[ "$updated" == "true" ]]; then
-    _pwrfzf_verbose "Config file updated with new variables."
     # Reload config immediately so new variables are active in running script
     source "$target" 2>/dev/null
   fi
@@ -260,6 +263,10 @@ function _validate_config() {
   
   if [[ "$PWRFZF_SEARCH_NAMES_ONLY" != "true" && "$PWRFZF_SEARCH_NAMES_ONLY" != "false" ]]; then
     PWRFZF_SEARCH_NAMES_ONLY="false"
+  fi
+
+  if [[ "$PWRFZF_GLSA_REVERSE" != "true" && "$PWRFZF_GLSA_REVERSE" != "false" ]]; then
+    PWRFZF_GLSA_REVERSE="true"
   fi
 
   if [[ -z "$PWRFZF_EDITOR" ]]; then
@@ -313,6 +320,9 @@ PWRFZF_SEARCH_NAMES_ONLY=false
 # History / Log Backend (elogv, elogfzf, genlop, qlop, log, auto)
 PWRFZF_HISTORY_CMD="elogv"
 
+# GLSA sorting: true = newest first, false = oldest first
+PWRFZF_GLSA_REVERSE=true
+
 # Preferred text editor for config files and eLogs
 # (e.g. nvim, nano, vim, kate, gedit). Leave empty to use system default ($EDITOR).
 PWRFZF_EDITOR=""
@@ -337,7 +347,6 @@ PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
 # Privilege escalation (sudo/doas/empty for root)
 PRIV_ESC="sudo"
 EOF
-  _pwrfzf_verbose "Created default configuration: $PWRFZF_CONFIG_FILE"
 }
 
 function _find_privilege_escalator() {
@@ -464,6 +473,8 @@ function _print_divider() {
   echo "══════════════════════════════════════"
 }
 
+# IMPORTANT: All UI functions write to >&2 (stderr) to avoid polluting stdout.
+# Stdout is STRICTLY reserved for data pipes used by FZF previews and lists!
 function _pwrfzf_error() {
   printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Red]}${pwrfzf_color[White]} ERROR ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Red]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
   _pwrfzf_log "ERROR: $*"
@@ -474,14 +485,17 @@ function _pwrfzf_warning() {
   _pwrfzf_log "WARNING: $*"
 }
 
-function _pwrfzf_verbose() {
-  printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@"
-  _pwrfzf_log "VERBOSE: $*"
+function _pwrfzf_success() {
+  printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Green]}${pwrfzf_color[Black]} SUCCESS ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Green]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+  _pwrfzf_log "SUCCESS: $*"
 }
 
-function _pwrfzf_success() {
-  printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Green]}${pwrfzf_color[Black]} SUCCESS ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Green]}%s${pwrfzf_color[Reset]}\n" "$@"
-  _pwrfzf_log "SUCCESS: $*"
+function _pwrfzf_verbose() {
+  # Disabled by default on stdout/stderr to prevent breaking FZF pipelines and TUI corruption.
+  if [[ "${PWRFZF_DEBUG:-false}" == "true" ]]; then
+    printf "${pwrfzf_color[Bold]}${pwrfzf_color[BG_Blue]}${pwrfzf_color[Yellow]} VERBOSE ${pwrfzf_color[Reset]}:\t${pwrfzf_color[Italic]}${pwrfzf_color[Cyan]}%s${pwrfzf_color[Reset]}\n" "$@" >&2
+  fi
+  _pwrfzf_log "VERBOSE: $*"
 }
 
 function _fzf_viewer() {
@@ -701,6 +715,34 @@ function _news_viewer() {
   done
 }
 
+function _get_glsa_list() {
+  local flag_file="${PWRFZF_CACHE_DIR}/.show_all_glsa"
+  local cmd="${PRIV_ESC} glsa-check -n -l"
+  
+  if [[ -f "$flag_file" ]]; then
+    cmd="$cmd all"
+  else
+    cmd="$cmd affected"
+  fi
+
+  # Apply dynamic sorting based on user config (newest top vs oldest top)
+  if [[ "${PWRFZF_GLSA_REVERSE}" == "true" ]]; then
+    $cmd 2>/dev/null | grep -E '^[0-9]{6}-[0-9]{2}' | sort -r
+  else
+    $cmd 2>/dev/null | grep -E '^[0-9]{6}-[0-9]{2}'
+  fi
+}
+
+function _toggle_glsa() {
+  local flag_file="${PWRFZF_CACHE_DIR}/.show_all_glsa"
+  if [[ -f "$flag_file" ]]; then
+    rm -f "$flag_file"
+  else
+    touch "$flag_file"
+  fi
+  _get_glsa_list
+}
+
 function _glsa_viewer() {
   if ! command -v glsa-check >/dev/null 2>&1; then
     _pwrfzf_error "glsa-check not found. Please emerge app-portage/gentoolkit."
@@ -708,36 +750,40 @@ function _glsa_viewer() {
     return
   fi
 
+  # Pre-authenticate sudo so password prompts don't corrupt FZF
+  if [[ -n "$PRIV_ESC" ]]; then
+    $PRIV_ESC true < /dev/tty
+  fi
+
+  # Always start with only 'affected' GLSAs
+  rm -f "${PWRFZF_CACHE_DIR}/.show_all_glsa"
+
+  # Force absolute path to prevent $PATH confusion where FZF runs an old script version
+  local script_cmd
+  if command -v realpath >/dev/null 2>&1; then
+    script_cmd="$(realpath "${BASH_SOURCE[0]}")"
+  else
+    script_cmd="${BASH_SOURCE[0]}"
+  fi
+
   while true; do
-    local glsa_list
-    glsa_list=$(glsa-check -l 2>/dev/null)
-    
-    if [[ -z "$glsa_list" || "$glsa_list" =~ "This system is not affected" ]]; then
-      echo "✅ No unapplied GLSA found. System is secure!"
-      read -n1 -rsp "Press any key to return..." < /dev/tty
-      break
-    fi
-    
-    local parsed_glsa
-    parsed_glsa=$(echo "$glsa_list" | grep -E '^[[:space:]]*\[[A-Z]\]')
-    [[ -z "$parsed_glsa" ]] && parsed_glsa="$glsa_list"
-    
     local selected
-    selected=$(echo "$parsed_glsa" | fzf \
-      --header "Security Advisories (Enter to view, F2 to fix, ESC to exit)" \
-      --preview "glsa-check -d \$(echo {} | awk '{print \$2}') 2>/dev/null" \
+    selected=$("$script_cmd" _get_glsa_list | fzf \
+      --header "GLSA | ENTER: View | F2: Fix | F3: Inject (Ignore) | CTRL-A: Toggle All/Affected | ESC: Exit" \
+      --preview "${PRIV_ESC} glsa-check -n -d {1} 2>/dev/null" \
       --preview-window="right:60%:wrap:follow" \
-      --bind "f2:execute(bash -c '${PRIV_ESC} glsa-check -f \$(echo {2}); echo; read -n1 -rsp \"Press any key...\" </dev/tty')+reload(glsa-check -l 2>/dev/null | grep -E '^[[:space:]]*\[[A-Z]\]')" \
+      --bind "ctrl-a:reload(\"$script_cmd\" _toggle_glsa)" \
+      --bind "f2:execute(bash -c '${PRIV_ESC} glsa-check -f {1}; echo; read -n1 -rsp \"Press any key to return...\" </dev/tty')+reload(\"$script_cmd\" _get_glsa_list)" \
+      --bind "f3:execute(bash -c '${PRIV_ESC} glsa-check -i {1} >/dev/null; echo \"✅ GLSA {1} injected (ignored).\"; sleep 1')+reload(\"$script_cmd\" _get_glsa_list)" \
       --border 'double' --border-label="┨${PROG} - Security Advisories┠" --color="${pwrfzf_colortheme}")
     
     [[ -z "$selected" ]] && break
     
     local glsa_id
-    glsa_id=$(echo "$selected" | awk '{print $2}')
-    [[ -n "$glsa_id" ]] && glsa-check -d "$glsa_id" | _fzf_viewer "GLSA: $glsa_id"
+    glsa_id=$(echo "$selected" | awk '{print $1}')
+    [[ -n "$glsa_id" ]] && ${PRIV_ESC} glsa-check -n -d "$glsa_id" | _fzf_viewer "GLSA: $glsa_id"
   done
 }
-
 
 # ------------------------------------------------------------------------------
 # EMERGE HISTORY & ELOG VIEWER
@@ -745,7 +791,7 @@ function _glsa_viewer() {
 function _elogfzf_viewer() {
   if ! ${PRIV_ESC} test -d "$ELOG_DIR"; then
     echo "eLog directory not found at $ELOG_DIR"
-    read -n1 -s
+    read -n1 -s < /dev/tty
     return
   fi
 
@@ -768,7 +814,7 @@ function _elogfzf_viewer() {
       --preview "${PRIV_ESC} $bat_cmd {} 2>/dev/null || ${PRIV_ESC} cat {}" \
       --preview-window="right:60%:wrap:follow" \
       --bind "f2:execute(${PRIV_ESC} rm -i {})+reload($reload_cmd)" \
-      --bind "f3:execute(bash -c 'read -p \"Delete ALL eLogs? (yes/NO): \" confirm; [[ \$confirm == yes ]] && ${PRIV_ESC} find \"$ELOG_DIR\" -type f -delete && echo \"All logs deleted.\"; read -n1 -rsp \"Press any key...\"')+reload($reload_cmd)" \
+      --bind "f3:execute(bash -c 'read -p \"Delete ALL eLogs? (yes/NO): \" confirm; [[ \$confirm == yes ]] && ${PRIV_ESC} find \"$ELOG_DIR\" -type f -delete && echo \"All logs deleted.\"; read -n1 -rsp \"Press any key...\" < /dev/tty')+reload($reload_cmd)" \
       --bind "pgup:preview-up,pgdn:preview-down,ctrl-u:preview-up,ctrl-d:preview-down" \
       --header "ENTER: open | F2: delete log | F3: delete ALL logs | PgUp/Dn or Ctrl-U/D: scroll" \
       --border 'double' --border-label="┨${PROG} - eLog Viewer (elogfzf)┠" --color="${pwrfzf_colortheme}")
@@ -887,12 +933,12 @@ function _show_emerge_history() {
           --border-label="┨${PROG} - History┠" --color="${pwrfzf_colortheme}"
       else
         echo "emerge.log not found."
-        read -n1 -s
+        read -n1 -s < /dev/tty
       fi
       ;;
     *)
       echo "Unknown history mode: $history_mode"
-      read -n1 -s
+      read -n1 -s < /dev/tty
       ;;
   esac
 }
@@ -2846,8 +2892,21 @@ case "${1:-}" in
     __fzf_preview "$2"
     exit 0
     ;;
-  _config_preview|_action_preview|_sets_action_preview|_show_emerge_history|_toggle_installed|_run_config_updater|_world_update)
-    # Load config in the subshell to ensure FZF binds inherit settings!
+  _config_preview|_action_preview|_sets_action_preview|_toggle_installed|_get_glsa_list|_toggle_glsa)
+    # ⚠️ Data streams for FZF - absolutely no terminal output allowed here!
+    # Any 'echo' or 'printf' to stdout will corrupt the FZF interface.
+    # Therefore, _pwrfzf_verbose logs silently to file here.
+    function _pwrfzf_verbose() { _pwrfzf_log "VERBOSE: $*"; }
+    _load_config
+    _validate_config
+    _set_colors
+    _find_privilege_escalator
+    _find_emerge
+    "$1" "${@:2}"
+    exit 0
+    ;;
+  _show_emerge_history|_run_config_updater|_world_update)
+    # Interactive FZF execute wrappers
     _load_config
     _validate_config
     _set_colors
