@@ -20,7 +20,7 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS (DYNAMIC PORTAGEQ EXTRACTION)
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.7"
+readonly PWRFZF_VERSION="2.8"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
@@ -182,7 +182,6 @@ function _update_config() {
     local var_name="$1"
     local content="$2"
     
-    # Matches VAR= or #VAR= or # VAR=
     if ! grep -qE "^[#[:space:]]*${var_name}=" "$target" 2>/dev/null; then
       echo -e "\n$content" >> "$target"
       updated=true
@@ -263,7 +262,6 @@ function _validate_config() {
     PWRFZF_SEARCH_NAMES_ONLY="false"
   fi
 
-  # Set default editor if empty
   if [[ -z "$PWRFZF_EDITOR" ]]; then
     PWRFZF_EDITOR="${EDITOR:-nvim}"
   fi
@@ -599,6 +597,14 @@ function __fzf_preview() {
   {
     eix "$package_name" 2>/dev/null
     
+    if command -v equery >/dev/null 2>&1; then
+      echo
+      echo "════════════════════════════════════════════════════════════════════════════════"
+      echo "USE FLAGS (equery):"
+      # Suppress verbose legend and standard output noise from equery uses
+      equery uses "$package_name" 2>/dev/null | grep -v '\[ Legend :' | grep -v '^ *U - ' | grep -v '^ *I - ' | grep -v '^[[:space:]]*$'
+    fi
+    
     echo
     echo "════════════════════════════════════════════════════════════════════════════════"
     echo "PORTAGE CONFIGURATION:"
@@ -650,6 +656,88 @@ function _run_config_updater() {
     read -n1 -s < /dev/tty
   fi
 }
+
+# ------------------------------------------------------------------------------
+# NEWS & GLSA VIEWERS
+# ------------------------------------------------------------------------------
+function _news_viewer() {
+  if ! command -v eselect >/dev/null 2>&1; then
+    _pwrfzf_error "eselect not found."
+    read -n1 -s < /dev/tty
+    return
+  fi
+
+  while true; do
+    local news_list
+    news_list=$(eselect news list 2>/dev/null)
+    
+    local parsed_news
+    parsed_news=$(echo "$news_list" | grep -E '^[[:space:]]*\[[0-9]+\]')
+    
+    if [[ -z "$parsed_news" ]]; then
+      echo "✅ No news found."
+      read -n1 -rsp "Press any key to return..." </dev/tty
+      break
+    fi
+    
+    local selected
+    selected=$(echo "$parsed_news" | fzf \
+      --header "Gentoo News | ENTER: Read | F2: Mark Read | F3: Mark Unread | F4: Purge Read | ESC: Exit" \
+      --preview "eselect news read \$(echo {} | awk '{print \$1}' | tr -d '[]*N') 2>/dev/null" \
+      --preview-window="right:60%:wrap:follow" \
+      --bind "f2:execute(bash -c '${PRIV_ESC} eselect news read \$(echo {1} | tr -d \"[]*N\") >/dev/null')+reload(eselect news list 2>/dev/null | grep -E '^[[:space:]]*\[[0-9]+\]')" \
+      --bind "f3:execute(bash -c '${PRIV_ESC} eselect news unread \$(echo {1} | tr -d \"[]*N\") >/dev/null')+reload(eselect news list 2>/dev/null | grep -E '^[[:space:]]*\[[0-9]+\]')" \
+      --bind "f4:execute(bash -c '${PRIV_ESC} eselect news purge >/dev/null')+reload(eselect news list 2>/dev/null | grep -E '^[[:space:]]*\[[0-9]+\]')" \
+      --border 'double' --border-label="┨${PROG} - Gentoo News┠" --color="${pwrfzf_colortheme}")
+    
+    [[ -z "$selected" ]] && break
+    
+    local news_item
+    news_item=$(echo "$selected" | awk '{print $1}' | tr -d '[]*N')
+    if [[ -n "$news_item" ]]; then
+      # Read WITH privilege escalation so it gets marked as read!
+      ${PRIV_ESC} eselect news read "$news_item" | _fzf_viewer "News Item: $news_item"
+    fi
+  done
+}
+
+function _glsa_viewer() {
+  if ! command -v glsa-check >/dev/null 2>&1; then
+    _pwrfzf_error "glsa-check not found. Please emerge app-portage/gentoolkit."
+    read -n1 -s < /dev/tty
+    return
+  fi
+
+  while true; do
+    local glsa_list
+    glsa_list=$(glsa-check -l 2>/dev/null)
+    
+    if [[ -z "$glsa_list" || "$glsa_list" =~ "This system is not affected" ]]; then
+      echo "✅ No unapplied GLSA found. System is secure!"
+      read -n1 -rsp "Press any key to return..." < /dev/tty
+      break
+    fi
+    
+    local parsed_glsa
+    parsed_glsa=$(echo "$glsa_list" | grep -E '^[[:space:]]*\[[A-Z]\]')
+    [[ -z "$parsed_glsa" ]] && parsed_glsa="$glsa_list"
+    
+    local selected
+    selected=$(echo "$parsed_glsa" | fzf \
+      --header "Security Advisories (Enter to view, F2 to fix, ESC to exit)" \
+      --preview "glsa-check -d \$(echo {} | awk '{print \$2}') 2>/dev/null" \
+      --preview-window="right:60%:wrap:follow" \
+      --bind "f2:execute(bash -c '${PRIV_ESC} glsa-check -f \$(echo {2}); echo; read -n1 -rsp \"Press any key...\" </dev/tty')+reload(glsa-check -l 2>/dev/null | grep -E '^[[:space:]]*\[[A-Z]\]')" \
+      --border 'double' --border-label="┨${PROG} - Security Advisories┠" --color="${pwrfzf_colortheme}")
+    
+    [[ -z "$selected" ]] && break
+    
+    local glsa_id
+    glsa_id=$(echo "$selected" | awk '{print $2}')
+    [[ -n "$glsa_id" ]] && glsa-check -d "$glsa_id" | _fzf_viewer "GLSA: $glsa_id"
+  done
+}
+
 
 # ------------------------------------------------------------------------------
 # EMERGE HISTORY & ELOG VIEWER
@@ -769,7 +857,7 @@ readonly PREVIEW_CMD="if [[ -d {} ]]; then echo '=== DIRECTORY: {} ==='; echo '�
 function _portage_config_manager() {
   while true; do
     local mode
-    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse Config Directory\n3. 📜 View eLogs / Emerge History\n4. 🔄 Run System Config Updater ($PWRFZF_CONFIG_UPDATER)\n5. ⚙️  Edit pwrfzf.conf\n6. Back" | fzf \
+    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse Config Directory\n3. 📜 View eLogs / Emerge History\n4. 📰 View Gentoo News (eselect)\n5. 🛡️ Check Security Advisories (GLSA)\n6. 🔄 Run System Config Updater ($PWRFZF_CONFIG_UPDATER)\n7. ⚙️  Edit pwrfzf.conf\n8. Back" | fzf \
       --header "Portage Management" \
       --border-label="┨${PROG} - Main Menu┠" \
       --border 'double' \
@@ -779,8 +867,10 @@ function _portage_config_manager() {
       *Guided*) _guided_wizards ;;
       *Browse*) _file_browser ;;
       *History*) _show_emerge_history ;;
+      *News*) _news_viewer ;;
+      *GLSA*) _glsa_viewer ;;
       *Updater*) _run_config_updater ;;
-      *Edit*Config*|*Edit*conf*) 
+      *Edit*pwrfzf.conf*) 
          _launch_editor "$PWRFZF_CONFIG_FILE"
          # Reload configuration instantly after the editor closes
          _load_config
@@ -1488,7 +1578,7 @@ function _add_config_entry() {
   
   _print_divider
   echo "Enter package name (atom):"
-  echo "Example: app-editors/neovim"
+  echo "Example: app-editors/neovim or app-misc/yazi::guru"
   read -rp "Package: " package
   [[ -z "$package" ]] && return
   
@@ -1548,6 +1638,10 @@ function _add_config_entry() {
   read -rp "Add this entry? (y/N) " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
     ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+    
+    # Ensure trailing newline safely before appending
+    ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
+    
     echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
     _pwrfzf_success "Added to $config_file: $new_entry"
   else
@@ -1618,8 +1712,8 @@ function _create_new_config_file_simple() {
   {
     _print_divider >&2
     echo "Create new file for package.$config_type" >&2
-    echo "Enter filename [${default_filename}]:" >&2
-    echo -n "Filename: " >&2
+    echo "Enter filename (e.g. custom-$config_type or guru_mask):" >&2
+    echo -n "Filename [$default_filename]: " >&2
   }
   
   read -r filename
@@ -1644,7 +1738,12 @@ function _add_keyword_entry() {
   
   echo
   _print_divider
-  echo "Unmasking package: $package"
+  echo "Unmasking package (Keyword): $package"
+  
+  local edited_package
+  read -e -i "$package" -p "Edit package atom: " edited_package
+  [[ -z "$edited_package" ]] && return 1
+  package="$edited_package"
   
   local selected_keyword
   selected_keyword=$(echo -e "~amd64\n~arm64\namd64\narm64\n-**" | fzf --prompt "Select keyword: ")
@@ -1673,6 +1772,10 @@ function _add_keyword_entry() {
   read -rp "Add this entry? (y/N) " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+    
+    # Ensure trailing newline safely before appending
+    ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
+    
     if echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null; then
       _pwrfzf_success "Added to $config_file: $new_entry"
       return 0
@@ -1830,11 +1933,11 @@ function _install_packages_with_fallback() {
         local keyword_packages=()
 
         if echo "$pretend_output" | grep -q "masked"; then
-          masked_packages=($(echo "$pretend_output" | grep -E "!!!.*masked" | sed -E 's/.*"([^"]+)".*/\1/' | sort -u))
+          masked_packages=($(echo "$pretend_output" | grep -E "!!!.*masked" | sed -nE 's/.*"([^"]+)".*/\1/p' | sed -e 's/\[.*\]//g' | sort -u))
         fi
         
         if echo "$pretend_output" | grep -q "keyword.*masked"; then
-          keyword_packages=($(echo "$pretend_output" | grep -E "!!!.*keyword.*masked" | sed -E 's/.*"([^"]+)".*/\1/' | sort -u))
+          keyword_packages=($(echo "$pretend_output" | grep -E "!!!.*keyword.*masked" | sed -nE 's/.*"([^"]+)".*/\1/p' | sed -e 's/\[.*\]//g' | sort -u))
         fi
 
         if echo "$pretend_output" | grep -q "circular dependencies"; then
@@ -1883,7 +1986,7 @@ function _install_packages_with_fallback() {
         fi
         
         options+=("5" "6" "7")
-        option_descriptions+=("Open Portage config manager (all files)" "Let emerge handle automatically (--autounmask-use)")
+        option_descriptions+=("Open Portage config manager (all files)" "Let emerge handle automatically (--autounmask-write)")
         option_descriptions+=("Skip problematic packages and retry")
 
         for i in "${!options[@]}"; do
@@ -1935,9 +2038,10 @@ function _install_packages_with_fallback() {
             continue
             ;;
           6)
-            echo "🔧 Allowing emerge to handle automatically..."
-            emerge_args=("--autounmask-use" "${emerge_args[@]}")
-            echo "🔄 Retrying with automatic unmasking..."
+            echo "🔧 Letting Portage generate and write configuration changes..."
+            ${EMERGE_CMD} --autounmask-write=y --autounmask=y "${emerge_args[@]}"
+            _run_config_updater
+            echo "🔄 Retrying with updated configuration..."
             continue
             ;;
           7)
@@ -2008,6 +2112,11 @@ function _apply_suggested_use_flags() {
       echo "Using package: $package_atom"
     fi
     
+    local edited_package
+    read -e -i "$package_atom" -p "Edit package atom (e.g. append ::repo): " edited_package
+    [[ -z "$edited_package" ]] && continue
+    package_atom="$edited_package"
+    
     echo "Select file to add USE flag:"
     local config_file
     config_file=$(_select_config_file "use")
@@ -2031,6 +2140,10 @@ function _apply_suggested_use_flags() {
     
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
       ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+      
+      # Ensure trailing newline safely before appending
+      ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
+      
       echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
       
       if ${PRIV_ESC} grep -q "$package_atom" "$config_file" 2>/dev/null; then
@@ -2130,6 +2243,11 @@ function _add_use_flags_interactive() {
   _print_divider
   echo "Add USE flags for: $package"
   
+  local edited_package
+  read -e -i "$package" -p "Edit package atom (e.g. append ::repo): " edited_package
+  [[ -z "$edited_package" ]] && return 1
+  package="$edited_package"
+  
   local available_flags=()
   local ebuild_path
   ebuild_path=$(equery which "$package" 2>/dev/null)
@@ -2195,6 +2313,10 @@ function _add_use_flags_interactive() {
   read -rp "Add this entry? (y/N) " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+    
+    # Ensure trailing newline safely before appending
+    ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
+    
     echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
     _pwrfzf_success "Added to $config_file: $use_entry"
     return 0
@@ -2278,7 +2400,7 @@ function _unmask_packages() {
   local real_packages=()
   
   for package in "${packages[@]}"; do
-    if [[ "$package" =~ ^[a-zA-Z0-9+_.-]+/[a-zA-Z0-9+_.-]+$ ]]; then
+    if [[ "$package" == */* ]]; then
       real_packages+=("$package")
     fi
   done
@@ -2292,25 +2414,41 @@ function _unmask_packages() {
   
   for package in "${real_packages[@]}"; do
     _print_divider
-    echo "Processing: $package"
+    echo "🛠️ Processing Masked Package: $package"
     
+    # Analyze exact masking reasons
     local mask_info
-    mask_info=$(emerge --pretend "$package" 2>&1 | grep -E "(masked by|keyword)" | head -1)
+    mask_info=$(${EMERGE_CMD} --pretend "$package" 2>&1 | grep -A1 "masked by:" | head -2 | tr '\n' ' ')
     
-    if [[ "$mask_info" =~ keyword ]]; then
-      _pwrfzf_verbose "Package $package is masked by keywords"
-      _add_keyword_entry "$package"
-    elif [[ "$mask_info" =~ masked ]]; then
-      _pwrfzf_verbose "Package $package is hard masked"
-      echo "This package is hard masked and cannot be easily unmasked."
-      echo "You may need to check package.mask files or use package.unmask."
+    local needs_keyword=false
+    local needs_unmask=false
+    
+    if [[ "$mask_info" =~ "missing keyword" ]]; then
+      needs_keyword=true
+    fi
+    if [[ "$mask_info" =~ "package.mask" ]]; then
+      needs_unmask=true
+    fi
+    
+    # Fallback if detection fails
+    if [[ "$needs_keyword" == "false" && "$needs_unmask" == "false" ]]; then
+      needs_keyword=true
+      needs_unmask=true
+    fi
+    
+    if [[ "$needs_keyword" == "true" ]]; then
       echo
-      read -rp "Add to package.unmask? (y/N) " answer
-      if [[ "$answer" =~ ^[Yy]$ ]]; then
-        _add_unmask_entry "$package"
-      fi
+      echo "👉 Action Required: Add to package.accept_keywords"
+      _add_keyword_entry "$package"
     else
-      _pwrfzf_warning "Unknown masking type for $package"
+      echo
+      echo "✅ Keywords are already satisfied (e.g., via make.conf). Skipping accept_keywords."
+    fi
+    
+    if [[ "$needs_unmask" == "true" ]]; then
+      echo
+      echo "👉 Action Required: Add to package.unmask"
+      _add_unmask_entry "$package"
     fi
   done
 }
@@ -2319,7 +2457,13 @@ function _add_unmask_entry() {
   local package="$1"
   
   _print_divider
-  echo "Unmasking package: $package"
+  echo "Unmasking package (Mask): $package"
+  
+  local edited_package
+  read -e -i "$package" -p "Edit package atom (e.g. append ::repo): " edited_package
+  [[ -z "$edited_package" ]] && return
+  package="$edited_package"
+  
   local new_entry="$package"
   
   echo "Select file to add unmask entry:"
@@ -2334,8 +2478,12 @@ function _add_unmask_entry() {
   echo "File: $config_file"
   echo
   read -rp "Add this entry? (y/N) " answer
-  if [[ "$answer" =~ ^[Yy]$ ]]; then
+  if [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]; then
     ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+    
+    # Ensure trailing newline safely before appending
+    ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
+    
     echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
     _pwrfzf_success "Added to $config_file: $new_entry"
   fi
@@ -2431,8 +2579,6 @@ function main() {
       PKGS=("${last_selected_packages[@]}")
       auto_retry=false
     else
-      # 💥 CRITICAL FIX: The tr -d ':' ensures that trailing colons from FZF selections
-      # do NOT break emerge -aC
       __emerge_list "$SearchInput" | fzf "${fzf_search_opts[@]}" \
         --bind "ctrl-r:execute:pkgs=\$(echo {+1} | tr -d ':'); [[ -n \"\$pkgs\" ]] && ${EMERGE_CMD} -aC \$pkgs" \
         --bind "ctrl-x:execute:${EMERGE_CMD} -a --depclean" \

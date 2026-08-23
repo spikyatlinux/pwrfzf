@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.8] - 2026-08-23
+### Added
+- **Gentoo News Integration:** Added a fully interactive News Reader (`eselect news`) to the management menu. Features live previews, reading (Enter), marking as read (F2), unread (F3), and purging (F4).
+- **Security Advisory (GLSA) Manager:** Integrated `glsa-check` into the management menu. You can now preview vulnerabilities and automatically apply patches directly via FZF (F2).
+- **USE-Flag Preview:** The FZF package preview window now automatically fetches and displays active/available USE flags via `equery uses` (with the verbose legend cleanly stripped out).
+- **Intelligent Unmasking Workflow:** The unmasking wizard now analyzes the exact masking reason via `emerge --pretend`. It automatically skips the `package.accept_keywords` prompt if your `make.conf` (e.g., `ACCEPT_KEYWORDS="~amd64"`) already satisfies the requirement.
+- **Interactive Atom Editor:** When adding entries to `package.unmask` or `package.use`, you can now edit the parsed package atom on the fly (e.g., to append specific overlay tags like `::guru`).
+
+### Changed
+- **Default Config Updater:** Changed the default `PWRFZF_CONFIG_UPDATER` from `dispatch-conf` to `cfg-update -u`.
+- **Improved Autounmask (Option 6):** The "Let emerge handle automatically" option now leverages `--autounmask-write=y` and instantly triggers your configured config updater (e.g., `cfg-update`) afterwards, creating a flawless automated workflow.
+- **Removed `-l` CLI Flag:** Removed the `--last-merge` flag in favor of the much more robust internal `Ctrl-y` eLog/history menu.
+
+### Fixed
+- **FZF Quoting Bug:** Fixed a critical bug in `elogfzf` where `fzf`'s native `{}` escaping collided with manual quotes (`\"{}\"`), causing `cat` to fail with "file not found" errors.
+- **Portage eLog Parsing:** Completely rewrote the `tac/grep` filter to correctly parse Gentoo's new `::: completed merging` format in `emerge.log` for the recent history viewer.
+- **Missing Newline Bug:** Fixed an issue where appending to `/etc/portage/package.*` files would merge two package atoms onto the same line if the file lacked a trailing newline. The script now safely injects newlines if needed.
+- **USE-Flag Constraint Bug:** Fixed an issue where the unmasking wizard would write invalid atoms containing USE-flag brackets (e.g., `[python_targets_...]`) into `package.unmask` or `package.accept_keywords`. These are now safely stripped.
+- **TTY Subshell Execution:** Fixed an issue where `cfg-update`, `elogv` and GUI text editors would lose terminal connection when launched from within the FZF subshell. 
+- **Menu Routing:** Fixed a broken regex match that prevented the "Edit pwrfzf.conf" menu option from launching the editor.
+- **Privilege Escalation in Logs:** Ensured `sudo`/`doas` is actively used when searching or opening protected logs in `/var/log/portage/elog/` to prevent silent "Permission denied" errors.
+
 ## [2.7] - 2026-08-22
 ### Added
 - **Dynamic Portage Paths (`portageq`):** Eliminated hardcoded paths. The script now dynamically fetches `PORTAGE_CONFIGROOT`, `PORT_LOGDIR`, `EMERGE_LOG_DIR`, `DISTDIR`, `PKGDIR`, and the primary Gentoo repository path using native `portageq` commands, ensuring full compatibility with Gentoo Prefix and custom `make.conf` setups.
