@@ -92,8 +92,6 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 ## Quick Install
 ```bash
 git clone [https://github.com/spikyatlinux/pwrfzf.git](https://github.com/spikyatlinux/pwrfzf.git)
-# or from mirror
-# git clone [https://git.mysusi.org/spikyatlinux/pwrfzf.git](https://git.mysusi.org/spikyatlinux/pwrfzf.git)
 cd pwrfzf
 sudo cp -v ./bin/pwrfzf /usr/local/bin/
 ```
