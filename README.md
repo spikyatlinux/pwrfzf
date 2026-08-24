@@ -67,17 +67,16 @@ PWRFZF is an interactive TUI (Text User Interface) that combines the power of Ge
 
 ## 🚀 Features
 
-- **🔍 Interactive Package Search** - Fuzzy find packages with instant preview using eix
-- **⚡ Smart Installation** - Automatic dependency resolution with circular dependency handling
-- **📜 Emerge History & eLogs** - Built-in history viewer tracking recently installed/uninstalled packages (`genlop`/`qlop`) and an interactive `elog` viewer.
-- **🎨 Beautiful Interface** - Custom color themes with full Unicode support and borders
+- **🔍 Interactive Package Search** - Fuzzy find packages with instant preview using eix and dynamic USE flag info.
+- **⚡ Smart Installation** - Automatic dependency resolution with circular dependency handling and smart unmasking.
+- **📜 eLogs & History** - Built-in history viewer (`genlop`/`qlop`) and an interactive `elog` viewer.
+- **🚨 Failed Build Logs** - Instantly jump into a dedicated viewer for failed compile logs (`* ERROR:`) after an update.
+- **📰 Gentoo News & GLSA** - Read Gentoo news and check/apply security advisories interactively directly from the TUI.
+- **🎨 Beautiful Interface** - Custom color themes with full Unicode support, borders, and safe preview scrolling.
 - **🔧 Complete Portage Config Manager** - Manage ALL Portage configuration files, including a full `/etc/portage` directory explorer.
 - **⚙️ Live Config Editor** - Edit your `pwrfzf` settings directly from the TUI with instant hot-reloading.
-- **🛡️ Safe Operations** - Confirmation prompts, live emerge argument editing, and automatic configuration fixes
-- **📊 Real-time Preview** - Package info, USE flags, installed files, and config status
-- **🔄 Auto-Retry System** - Automatic retry with USE flag and keyword fixes
-- **🗑️ File Management** - Create, edit, and delete configuration files safely
-- **📝 Intelligent** logging system and smart config updating mechanism.
+- **🔄 System Config Updater** - Seamlessly trigger `cfg-update`, `dispatch-conf` or similar tools with a single keystroke.
+- **🛡️ Safe Operations** - Confirmation prompts, live emerge argument editing, and automatic configuration fixes.
 
 ## 📸 Screenshots
 | Package Search | Installation | Config Management |
@@ -103,17 +102,17 @@ sudo cp -v ./bin/pwrfzf /usr/local/bin/
 ```bash
 emerge --ask fzf eix app-portage/portage-utils
 ```
-*(Optional: `app-portage/genlop` or `app-portage/elogv` for advanced history tracking)*
+*(Optional: `app-portage/gentoolkit` for GLSA checks, `app-portage/genlop` or `app-portage/elogv` for advanced history tracking)*
 
 ## Basic Package Management
 ```bash
-# Interactive tui package browser
+# Interactive TUI package browser
 pwrfzf
 
 # Search for specific packages
 pwrfzf firefox
 
-# Open Portage configuration manager
+# Open Portage Configuration Manager (Dashboard)
 pwrfzf -c
 
 # Run a global system depclean
@@ -132,7 +131,7 @@ pwrfzf -k
 pwrfzf -V
 ```
 
-## Configuration file `~/.config/pwrfzf/pwrfzf-config`
+## Configuration file `~/.config/pwrfzf/pwrfzf.conf`
 
 The configuration file is automatically generated and updated with new variables on startup. You can also edit it live from the `pwrfzf -c` menu.
 
@@ -145,12 +144,14 @@ The configuration file is automatically generated and updated with new variables
 | `PWRFZF_CONFIRM_ACTIONS` | Confirm before installation/removal | `true` |
 | `PWRFZF_CONFIRM_EXIT` | Ask for confirmation before closing the app | `true` |
 | `PWRFZF_MAX_PREVIEW_LINES` | Maximum lines in package preview window | `50` |
-| `PWRFZF_LOGGING` | Enable logging to file | `false` |
+| `PWRFZF_LOGGING` | Enable logging to file (`pwrfzf.log`) | `false` |
 | `PWRFZF_FZF_LAYOUT` | Set FZF layout (`reverse` for top-down, `default` for bottom-up) | `"reverse"` |
 | `PWRFZF_EXACT_SEARCH` | Disable fuzzy match (requires exact substring matching) | `true` |
 | `PWRFZF_SEARCH_NAMES_ONLY`| Search ONLY in package names, ignore descriptions | `false` |
 | `PWRFZF_HISTORY_CMD` | Backend for history viewer (`elogv`, `elogfzf`, `genlop`, `qlop`, `log`, `auto`) | `"elogv"` |
+| `PWRFZF_GLSA_REVERSE` | GLSA sorting order (`true` = newest first, `false` = oldest first) | `true` |
 | `PWRFZF_EDITOR` | Preferred text editor. Leaves empty to use `$EDITOR` | `""` |
+| `PWRFZF_CONFIG_UPDATER` | Tool used to merge config files (e.g. `cfg-update -u`, `dispatch-conf`) | `"cfg-update -u"` |
 | `PWRFZF_PREVIEW_WINDOW` | FZF preview window position and size | `"right,60%,border-left"` |
 | `EMERGE_DEFAULT_OPTS` | Default options passed to emerge command | `"--quiet-build=y --keep-going"` |
 | `PRIV_ESC` | Privilege escalation command | `"sudo"` |
@@ -171,19 +172,22 @@ The configuration file is automatically generated and updated with new variables
 
 | Key | Action |
 |-----|--------|
+| Ctrl-w | Update all world packages (`emerge -avuDN @world`) |
 | Ctrl-x | Run System Depclean (`emerge --depclean`) |
-| Ctrl-w | Update all world packages |
 | Ctrl-z | Run preserved rebuild |
 | Ctrl-s | Sync repositories |
-| Ctrl-p | Toggle view: Show installed packages only vs. all packages |
 | Ctrl-y | View eLogs / Emerge History |
-| Ctrl-o | Open Portage Config Manager |
+| Alt-u  | Run System Config Updater (`$PWRFZF_CONFIG_UPDATER`) |
+| Ctrl-o | Open Portage Config Manager (Dashboard) |
+| Ctrl-p | Toggle view: Show installed packages only vs. all packages |
 
 ### Navigation & Search
 
 | Key | Action |
 |-----|--------|
-| ↑↓ / Ctrl-n / Ctrl-b | Navigate up/down |
+| ↑↓ / Ctrl-n / Ctrl-b | Navigate up/down in list |
+| Alt-Up / Alt-Down | Scroll preview window line-by-line |
+| Ctrl-Up / Ctrl-Down | Scroll preview window page-by-page |
 | HOME / END | Jump to top/bottom |
 | PAGEUP / PAGEDOWN | Page up/down |
 | Ctrl-l | Clear query and selection |
@@ -211,14 +215,20 @@ When confirming an action, you have access to a powerful interactive prompt:
 - `[r]` **Remove packages** from your current selection via an FZF pop-up menu
 - `[s]` **Save selected packages** to a Portage Set in `/etc/portage/sets/` without installing
 
-## 🔧 Portage Configuration Management
+## 🔧 Portage Configuration Management (Dashboard)
 
-Access the comprehensive Portage config manager with `Ctrl-o` or `pwrfzf -c`:
+Access the comprehensive Portage config manager with `Ctrl-o` or `pwrfzf -c`. It serves as a central hub for maintaining your system:
+
+### Administrative Tools
+- **📜 View eLogs / Emerge History** - Track what was installed and read vital Portage messages.
+- **📰 View Gentoo News** - Interactive `eselect news` reader. Mark as read, unread, or purge via hotkeys.
+- **🛡️ Check Security Advisories (GLSA)** - Review vulnerabilities (`glsa-check`). Toggle between *affected* and *all* GLSAs (`Ctrl-a`), apply patches (`F2`), or inject/ignore false positives (`F3`).
+- **🔄 Run System Config Updater** - Execute your configured tool (`cfg-update`, `dispatch-conf`, etc.) safely within the UI.
 
 ### File Browser Mode
 A full directory explorer for `/etc/portage` that detects if you are hovering over a file or a folder, providing `ls -lh` previews for directories and content previews for files using a native, searchable `fzf` viewer.
 
-### Guided Configuration Types
+### Guided Configuration Wizards
 - `make.conf` - Global settings (USE flags, CFLAGS, FEATURES, etc.)
 - `package.accept_keywords` - Package keywords and unmasking (~amd64, etc.)
 - `package.use` - Package-specific USE flags management
