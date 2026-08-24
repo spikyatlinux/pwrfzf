@@ -1,7 +1,6 @@
 # Changelog
 
 ## [2.8.3] - 2026-08-24
-
 ### Changed
 - **Global Preview Scrolling:** Standardized keyboard navigation for the right-hand preview window across all menus (Packages, Config Wizards, eLogs, GLSA, etc.).
   - Added `Alt+Up/Down` to scroll the preview line-by-line (bypasses terminal shift-scrolling conflicts).
