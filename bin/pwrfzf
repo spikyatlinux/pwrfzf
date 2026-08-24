@@ -20,7 +20,7 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS (DYNAMIC PORTAGEQ EXTRACTION)
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.8.2"
+readonly PWRFZF_VERSION="2.8.3"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
@@ -281,9 +281,12 @@ function _validate_config() {
     PWRFZF_CONFIG_UPDATER="cfg-update -u"
   fi
 
-  # Inject layout and exact-match globally into FZF
+  # Inject layout, exact-match, and global preview scrolling binds into FZF
   local fzf_globals="--layout=${PWRFZF_FZF_LAYOUT}"
   [[ "$PWRFZF_EXACT_SEARCH" == "true" ]] && fzf_globals="$fzf_globals --exact"
+  
+  # Global bindings for scrolling the preview window safely across terminals
+  fzf_globals="$fzf_globals --bind 'alt-up:preview-up,alt-down:preview-down,ctrl-up:preview-page-up,ctrl-down:preview-page-down'"
   
   export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:-} $fzf_globals"
 }
@@ -527,6 +530,8 @@ KEYBINDINGS:
               Ctrl-v : Hide/show preview
               Ctrl-l : Clear query
                Alt-u : Run Config Updater ($PWRFZF_CONFIG_UPDATER)
+         Alt-Up/Down : Scroll preview line-by-line
+        Ctrl-Up/Down : Scroll preview page-by-page
        Alt-backspace : Clear query
             Alt-left : Delete word
               Ctrl-h : Show keybindings
@@ -815,8 +820,8 @@ function _elogfzf_viewer() {
       --preview-window="right:60%:wrap:follow" \
       --bind "f2:execute(${PRIV_ESC} rm -i {})+reload($reload_cmd)" \
       --bind "f3:execute(bash -c 'read -p \"Delete ALL eLogs? (yes/NO): \" confirm; [[ \$confirm == yes ]] && ${PRIV_ESC} find \"$ELOG_DIR\" -type f -delete && echo \"All logs deleted.\"; read -n1 -rsp \"Press any key...\" < /dev/tty')+reload($reload_cmd)" \
-      --bind "pgup:preview-up,pgdn:preview-down,ctrl-u:preview-up,ctrl-d:preview-down" \
-      --header "ENTER: open | F2: delete log | F3: delete ALL logs | PgUp/Dn or Ctrl-U/D: scroll" \
+      --bind "pgup:preview-page-up,pgdn:preview-page-down" \
+      --header "ENTER: open | F2: delete log | F3: delete ALL logs | ESC: return" \
       --border 'double' --border-label="┨${PROG} - eLog Viewer (elogfzf)┠" --color="${pwrfzf_colortheme}")
     
     [[ -z "$selected" ]] && break
@@ -865,7 +870,7 @@ function _recent_build_logs_viewer() {
       --preview "${PRIV_ESC} $bat_cmd {} 2>/dev/null || ${PRIV_ESC} cat {}" \
       --preview-window="right:60%:wrap:follow" \
       --bind "f2:execute(${PRIV_ESC} rm -i {})+reload($reload_cmd)" \
-      --bind "pgup:preview-up,pgdn:preview-down,ctrl-u:preview-up,ctrl-d:preview-down" \
+      --bind "pgup:preview-page-up,pgdn:preview-page-down" \
       --header "ENTER: open | F2: delete log | ESC: return" \
       --border 'double' --border-label="┨${PROG} - Failed Build Logs┠" --color="${pwrfzf_colortheme}")
     

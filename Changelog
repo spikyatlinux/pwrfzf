@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.8.3] - 2026-08-24
+
+### Changed
+- **Global Preview Scrolling:** Standardized keyboard navigation for the right-hand preview window across all menus (Packages, Config Wizards, eLogs, GLSA, etc.).
+  - Added `Alt+Up/Down` to scroll the preview line-by-line (bypasses terminal shift-scrolling conflicts).
+  - Added `Ctrl+Up/Down` to scroll the preview page-by-page.
+- **eLog / Failed Log Viewers:** Replaced `PgUp/PgDn` with `Ctrl+Up/Down` to match the new global scrolling behavior, ensuring consistency across the entire application.
+
 ## [2.8.2] - 2026-08-23
 ### Added
 - **Dynamic GLSA Dashboard:** The Security Advisory viewer now opens by default even if the system is secure. Added `Ctrl-a` to dynamically toggle between "affected" and "all" historic GLSAs.
