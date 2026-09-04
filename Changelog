@@ -1,7 +1,6 @@
 # Changelog
 
 ## [2.8.4] - 2026-09-04
-
 ### Added
 - **Developer Feature Toggle:** Added `PWRFZF_ENABLE_KERNEL_HUB=false` to `pwrfzf.conf`. The System & Kernel Hub (`Ctrl-k`) is now an opt-in developer feature and hidden by default.
 
