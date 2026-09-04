@@ -7,12 +7,12 @@
 # ==============================================================================
 
 # Re-execute the script in bash if not running in bash or zsh
-if [ -z "$BASH_VERSION" ] && [ -z "$ZSH_VERSION" ]; then
+if [ -z "${BASH_VERSION:-}" ] && [ -z "${ZSH_VERSION:-}" ]; then
   exec bash "$0" "$@"
 fi
 
 # Check and set options for bash
-if [ -n "$BASH_VERSION" ]; then
+if [ -n "${BASH_VERSION:-}" ]; then
   shopt -s lastpipe
   export SHELL=bash
 fi
@@ -20,7 +20,7 @@ fi
 # ------------------------------------------------------------------------------
 # CONSTANTS & GLOBALS (DYNAMIC PORTAGEQ EXTRACTION)
 # ------------------------------------------------------------------------------
-readonly PWRFZF_VERSION="2.8.3"
+readonly PWRFZF_VERSION="2.8.4"
 readonly PROG="pwrfzf"
 readonly AUTHOR="spikyatlinux"
 readonly REPO="https://github.com/${AUTHOR}/${PROG}"
@@ -77,6 +77,7 @@ PWRFZF_CONFIG_UPDATER="${PWRFZF_CONFIG_UPDATER:-cfg-update -u}"
 PWRFZF_EMERGE_CMD="${PWRFZF_EMERGE_CMD:-emerge}"
 PWRFZF_COLOR_THEME="${PWRFZF_COLOR_THEME:-}"
 PWRFZF_GLSA_REVERSE="${PWRFZF_GLSA_REVERSE:-true}"
+PWRFZF_ENABLE_KERNEL_HUB="${PWRFZF_ENABLE_KERNEL_HUB:-false}"
 
 declare -g PWRFZF_MODE="packages"
 declare -g PWRFZF_LAYOUT="default"
@@ -109,6 +110,7 @@ function _pwrfzf_init() {
   _find_emerge
   _load_emerge_default_opts
   _load_layout
+  _clear_preview_cache
 }
 
 function _migrate_config() {
@@ -119,7 +121,7 @@ function _migrate_config() {
 }
 
 function _setup_logging() {
-  if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
+  if [[ "${PWRFZF_LOGGING:-false}" == "true" ]]; then
     local log_file="${PWRFZF_CONFIG_DIR}/pwrfzf.log"
     mkdir -p "$(dirname "$log_file")"
     touch "$log_file" 2>/dev/null
@@ -128,7 +130,7 @@ function _setup_logging() {
 }
 
 function _pwrfzf_log() {
-  if [[ "${PWRFZF_LOGGING}" == "true" ]]; then
+  if [[ "${PWRFZF_LOGGING:-false}" == "true" ]]; then
     local log_file="${PWRFZF_CONFIG_DIR}/pwrfzf.log"
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" >> "$log_file"
   fi
@@ -165,12 +167,14 @@ function _create_directories() {
 }
 
 function _load_config() {
-  if [[ -f "$PWRFZF_CONFIG_FILE" ]]; then
-    source "$PWRFZF_CONFIG_FILE" 2>/dev/null || _pwrfzf_warning "Error loading config file. Using defaults."
-    _update_config
-  else
+  # Create default config if entirely missing
+  if [[ ! -f "$PWRFZF_CONFIG_FILE" ]]; then
     _create_default_config
   fi
+  source "$PWRFZF_CONFIG_FILE" 2>/dev/null || _pwrfzf_warning "Error loading config file. Using defaults."
+  
+  # Auto-update logic: checks for missing variables and appends them dynamically
+  _update_config
 }
 
 function _update_config() {
@@ -182,51 +186,50 @@ function _update_config() {
   _append_if_missing() {
     local var_name="$1"
     local content="$2"
-    
     if ! grep -qE "^[#[:space:]]*${var_name}=" "$target" 2>/dev/null; then
       echo -e "\n$content" >> "$target"
       updated=true
     fi
   }
 
-  # --- Append new configuration variables here ---
+  _append_if_missing "PWRFZF_CONFIRM_EXIT" "# Confirm before exiting the application\nPWRFZF_CONFIRM_EXIT=true"
+  _append_if_missing "PWRFZF_FZF_LAYOUT" "# FZF Layout (reverse = top-down, default = bottom-up)\nPWRFZF_FZF_LAYOUT=\"reverse\""
+  _append_if_missing "PWRFZF_EXACT_SEARCH" "# Search Behavior\n# TRUE  = Exact substring match (e.g. 'wine' won't match 'window')\n# FALSE = Fuzzy match (e.g. 'wine' matches 'w..i..n..e')\n# When false you can use 'wine to search for exact name\nPWRFZF_EXACT_SEARCH=true"
+  _append_if_missing "PWRFZF_SEARCH_NAMES_ONLY" "# Search Targets\n# TRUE  = Search ONLY in package names (e.g. app-emulation/wine)\n# FALSE = Search in package names AND descriptions\nPWRFZF_SEARCH_NAMES_ONLY=false"
+  _append_if_missing "PWRFZF_HISTORY_CMD" "# History / Log Backend (elogv, elogfzf, genlop, qlop, log, auto)\nPWRFZF_HISTORY_CMD=\"elogv\""
+  _append_if_missing "PWRFZF_EDITOR" "# Preferred text editor for config files and eLogs\n# (e.g. nvim, nano, vim, kate, gedit). Leave empty to use system default (\$EDITOR).\nPWRFZF_EDITOR=\"\""
+  _append_if_missing "PWRFZF_CONFIG_UPDATER" "# Tool used to merge/update configuration files\n# (e.g. cfg-update -u, dispatch-conf, etc-update).\nPWRFZF_CONFIG_UPDATER=\"cfg-update -u\""
+  _append_if_missing "PWRFZF_EMERGE_CMD" "# Base emerge command (useful if you use a wrapper script)\nPWRFZF_EMERGE_CMD=\"emerge\""
+  _append_if_missing "PWRFZF_COLOR_THEME" "# Custom FZF color theme string. Leave empty for default.\n# Base scheme (dark|light|base16|bw) and/or custom colors\nPWRFZF_COLOR_THEME=\"\""
+  _append_if_missing "PWRFZF_GLSA_REVERSE" "# GLSA sorting: true = newest first, false = oldest first\nPWRFZF_GLSA_REVERSE=true"
+  _append_if_missing "PWRFZF_USE_DEFAULT_EMERGE_OPTS" "# Emerge behavior\nPWRFZF_USE_DEFAULT_EMERGE_OPTS=false"
+  _append_if_missing "PWRFZF_PREVIEW_WINDOW" "# Layout\nPWRFZF_PREVIEW_WINDOW=\"right,60%,border-left\""
 
-  _append_if_missing "PWRFZF_CONFIRM_EXIT" "# Confirm before exiting the application
-PWRFZF_CONFIRM_EXIT=true"
+  # WORLD UPDATE CONFIGURATION
+  _append_if_missing "PWRFZF_UPDATE_LOWER_PRIORITY" "# WORLD UPDATE: Lower process priority (renice/ionice) to keep system responsive\nPWRFZF_UPDATE_LOWER_PRIORITY=true"
+  _append_if_missing "PWRFZF_UPDATE_UPDATE_PORTAGE_FIRST" "# WORLD UPDATE: Update sys-apps/portage before @world\nPWRFZF_UPDATE_UPDATE_PORTAGE_FIRST=true"
+  _append_if_missing "PWRFZF_UPDATE_PRESERVED_REBUILD" "# WORLD UPDATE: Run @preserved-rebuild after update\nPWRFZF_UPDATE_PRESERVED_REBUILD=true"
+  _append_if_missing "PWRFZF_UPDATE_DEPCLEAN" "# WORLD UPDATE: Run emerge --depclean after update\nPWRFZF_UPDATE_DEPCLEAN=true"
+  _append_if_missing "PWRFZF_UPDATE_CLEAN_LOGS" "# WORLD UPDATE: Clean portage logs older than 7 days (emaint)\nPWRFZF_UPDATE_CLEAN_LOGS=true"
+  _append_if_missing "PWRFZF_UPDATE_ECLEAN_PACKAGES" "# WORLD UPDATE: Run eclean packages\nPWRFZF_UPDATE_ECLEAN_PACKAGES=false"
+  _append_if_missing "PWRFZF_UPDATE_ECLEAN_DISTFILES" "# WORLD UPDATE: Run eclean distfiles\nPWRFZF_UPDATE_ECLEAN_DISTFILES=false"
+  _append_if_missing "PWRFZF_UPDATE_EIX_UPDATE" "# WORLD UPDATE: Update eix cache at the end\nPWRFZF_UPDATE_EIX_UPDATE=true"
 
-  _append_if_missing "PWRFZF_FZF_LAYOUT" "# FZF Layout (reverse = top-down, default = bottom-up)
-PWRFZF_FZF_LAYOUT=\"reverse\""
-
-  _append_if_missing "PWRFZF_EXACT_SEARCH" "# Search Behavior
-# TRUE  = Exact substring match (e.g. 'wine' won't match 'window')
-# FALSE = Fuzzy match (e.g. 'wine' matches 'w..i..n..e')
-# When false you can use 'wine to search for exact name
-PWRFZF_EXACT_SEARCH=true"
-
-  _append_if_missing "PWRFZF_SEARCH_NAMES_ONLY" "# Search Targets
-# TRUE  = Search ONLY in package names (e.g. app-emulation/wine)
-# FALSE = Search in package names AND descriptions
-PWRFZF_SEARCH_NAMES_ONLY=false"
-
-  _append_if_missing "PWRFZF_HISTORY_CMD" "# History / Log Backend (elogv, elogfzf, genlop, qlop, log, auto)
-PWRFZF_HISTORY_CMD=\"elogv\""
-
-  _append_if_missing "PWRFZF_EDITOR" "# Preferred text editor for config files and eLogs
-# (e.g. nvim, nano, vim, kate, gedit). Leave empty to use system default (\$EDITOR).
-PWRFZF_EDITOR=\"\""
-
-  _append_if_missing "PWRFZF_CONFIG_UPDATER" "# Tool used to merge/update configuration files
-# (e.g. cfg-update -u, dispatch-conf, etc-update).
-PWRFZF_CONFIG_UPDATER=\"cfg-update -u\""
-
-  _append_if_missing "PWRFZF_EMERGE_CMD" "# Base emerge command (useful if you use a wrapper script)
-PWRFZF_EMERGE_CMD=\"emerge\""
-
-  _append_if_missing "PWRFZF_COLOR_THEME" "# Custom FZF color theme string. Leave empty for default.
-PWRFZF_COLOR_THEME=\"\""
-
-  _append_if_missing "PWRFZF_GLSA_REVERSE" "# GLSA sorting: true = newest first, false = oldest first
-PWRFZF_GLSA_REVERSE=true"
+  # ADVANCED KERNEL BUILDER CONFIGURATION (DEVELOPER)
+  _append_if_missing "PWRFZF_ENABLE_KERNEL_HUB" "# DEVELOPER: Enable Kernel & Dracut Hub (Ctrl-k) in UI (true/false)\nPWRFZF_ENABLE_KERNEL_HUB=false"
+  _append_if_missing "PWRFZF_KERNEL_USE_CUSTOM_INSTALL" "# KERNEL: Enable advanced custom kernel installation routine (true/false)\n# WARNING: Only enable this if you need custom EFI mounting, Dracut, and sbsign!\n# Default is true for this specific system layout. Set to false to use Gentoo's installkernel.\nPWRFZF_KERNEL_USE_CUSTOM_INSTALL=true"
+  _append_if_missing "PWRFZF_KERNEL_MAKEOPTS" "# KERNEL: Custom MAKEOPTS (e.g. \"-j32\"). If empty, falls back to make.conf MAKEOPTS\nPWRFZF_KERNEL_MAKEOPTS=\"\""
+  _append_if_missing "PWRFZF_KERNEL_COMPILER" "# KERNEL: Compiler selection (gcc or clang)\nPWRFZF_KERNEL_COMPILER=\"gcc\""
+  _append_if_missing "PWRFZF_KERNEL_SILENT_MAKE" "# KERNEL: Build the kernel in silent mode (-s)\nPWRFZF_KERNEL_SILENT_MAKE=false"
+  _append_if_missing "PWRFZF_KERNEL_USE_CCACHE" "# KERNEL: Use ccache to speed up re-compilation\nPWRFZF_KERNEL_USE_CCACHE=true"
+  _append_if_missing "PWRFZF_KERNEL_MAKE_MRPROPER" "# KERNEL: Perform 'make clean && make mrproper' and restore saved .config\nPWRFZF_KERNEL_MAKE_MRPROPER=false"
+  _append_if_missing "PWRFZF_KERNEL_USE_DRACUT" "# KERNEL: Enable dracut initrd generation\nPWRFZF_KERNEL_USE_DRACUT=true"
+  _append_if_missing "PWRFZF_KERNEL_GUI_TOOL" "# KERNEL: GUI tool to use for configuration (menuconfig, nconfig, xconfig, gconfig)\nPWRFZF_KERNEL_GUI_TOOL=\"xconfig\""
+  _append_if_missing "PWRFZF_KERNEL_TARGET_EFI_DIR" "# KERNEL: Target EFI directory name inside /efi/EFI/ (e.g. Gentoo)\nPWRFZF_KERNEL_TARGET_EFI_DIR=\"Gentoo\""
+  _append_if_missing "PWRFZF_KERNEL_EFI_PART_LABEL" "# KERNEL: Target boot partition name to match via /dev/disk/by-label/\nPWRFZF_KERNEL_EFI_PART_LABEL=\"EFI\""
+  _append_if_missing "PWRFZF_KERNEL_SIGNING_KEY" "# KERNEL: Path to Secure Boot Key. If empty, falls back to make.conf SECUREBOOT_SIGN_KEY\nPWRFZF_KERNEL_SIGNING_KEY=\"/etc/efikeys/sb-keys-2026/db.key\""
+  _append_if_missing "PWRFZF_KERNEL_SIGNING_CERT" "# KERNEL: Path to Secure Boot Cert. If empty, falls back to make.conf SECUREBOOT_SIGN_CERT\nPWRFZF_KERNEL_SIGNING_CERT=\"/etc/efikeys/sb-keys-2026/db.crt\""
+  _append_if_missing "PWRFZF_KERNEL_LOADEROPTS" "# KERNEL: Command line parameters (loaderopts)\n# Ensure to adapt PARTUUID and parameters to your system!\nPWRFZF_KERNEL_LOADEROPTS=\"root=PARTUUID=77e300af-dd46-451f-ba02-79f0107245cf rootflags=subvol=@ rootfstype=btrfs rd.vconsole.keymap=de-latin1 console=tty1 amdgpu.sg_display=0 quiet splash\""
 
   if [[ "$updated" == "true" ]]; then
     # Reload config immediately so new variables are active in running script
@@ -235,7 +238,7 @@ PWRFZF_GLSA_REVERSE=true"
 }
 
 function _validate_config() {
-  if [[ -n "$PRIV_ESC" ]]; then
+  if [[ -n "${PRIV_ESC:-}" ]]; then
     if [[ "$PRIV_ESC" != "sudo" && "$PRIV_ESC" != "doas" && "$PRIV_ESC" != "" ]]; then
       _pwrfzf_warning "Invalid PRIV_ESC value: '$PRIV_ESC'. Using auto-detection."
       unset PRIV_ESC
@@ -245,45 +248,48 @@ function _validate_config() {
     fi
   fi
   
-  if [[ "$PWRFZF_LOGGING" != "true" && "$PWRFZF_LOGGING" != "false" ]]; then
+  if [[ "${PWRFZF_LOGGING:-false}" != "true" && "${PWRFZF_LOGGING:-false}" != "false" ]]; then
     PWRFZF_LOGGING="false"
   fi
 
-  if [[ "$PWRFZF_CONFIRM_EXIT" != "true" && "$PWRFZF_CONFIRM_EXIT" != "false" ]]; then
+  if [[ "${PWRFZF_CONFIRM_EXIT}" != "true" && "${PWRFZF_CONFIRM_EXIT}" != "false" ]]; then
     PWRFZF_CONFIRM_EXIT="true"
   fi
 
-  if [[ "$PWRFZF_FZF_LAYOUT" != "reverse" && "$PWRFZF_FZF_LAYOUT" != "default" && "$PWRFZF_FZF_LAYOUT" != "reverse-list" ]]; then
+  if [[ "${PWRFZF_FZF_LAYOUT}" != "reverse" && "${PWRFZF_FZF_LAYOUT}" != "default" && "${PWRFZF_FZF_LAYOUT}" != "reverse-list" ]]; then
     PWRFZF_FZF_LAYOUT="reverse"
   fi
   
-  if [[ "$PWRFZF_EXACT_SEARCH" != "true" && "$PWRFZF_EXACT_SEARCH" != "false" ]]; then
+  if [[ "${PWRFZF_EXACT_SEARCH}" != "true" && "${PWRFZF_EXACT_SEARCH}" != "false" ]]; then
     PWRFZF_EXACT_SEARCH="true"
   fi
   
-  if [[ "$PWRFZF_SEARCH_NAMES_ONLY" != "true" && "$PWRFZF_SEARCH_NAMES_ONLY" != "false" ]]; then
+  if [[ "${PWRFZF_SEARCH_NAMES_ONLY}" != "true" && "${PWRFZF_SEARCH_NAMES_ONLY}" != "false" ]]; then
     PWRFZF_SEARCH_NAMES_ONLY="false"
   fi
 
-  if [[ "$PWRFZF_GLSA_REVERSE" != "true" && "$PWRFZF_GLSA_REVERSE" != "false" ]]; then
+  if [[ "${PWRFZF_GLSA_REVERSE}" != "true" && "${PWRFZF_GLSA_REVERSE}" != "false" ]]; then
     PWRFZF_GLSA_REVERSE="true"
   fi
 
-  if [[ -z "$PWRFZF_EDITOR" ]]; then
+  if [[ "${PWRFZF_ENABLE_KERNEL_HUB}" != "true" && "${PWRFZF_ENABLE_KERNEL_HUB}" != "false" ]]; then
+    PWRFZF_ENABLE_KERNEL_HUB="false"
+  fi
+
+  if [[ -z "${PWRFZF_EDITOR:-}" ]]; then
     PWRFZF_EDITOR="${EDITOR:-nvim}"
   fi
   
-  if [[ -z "$PWRFZF_EMERGE_CMD" ]]; then
+  if [[ -z "${PWRFZF_EMERGE_CMD:-}" ]]; then
     PWRFZF_EMERGE_CMD="emerge"
   fi
-
-  if [[ -z "$PWRFZF_CONFIG_UPDATER" ]]; then
+  
+  if [[ -z "${PWRFZF_CONFIG_UPDATER:-}" ]]; then
     PWRFZF_CONFIG_UPDATER="cfg-update -u"
   fi
 
-  # Inject layout, exact-match, and global preview scrolling binds into FZF
-  local fzf_globals="--layout=${PWRFZF_FZF_LAYOUT}"
-  [[ "$PWRFZF_EXACT_SEARCH" == "true" ]] && fzf_globals="$fzf_globals --exact"
+  local fzf_globals="--layout=${PWRFZF_FZF_LAYOUT:-reverse}"
+  [[ "${PWRFZF_EXACT_SEARCH:-true}" == "true" ]] && fzf_globals="$fzf_globals --exact"
   
   # Global bindings for scrolling the preview window safely across terminals
   fzf_globals="$fzf_globals --bind 'alt-up:preview-up,alt-down:preview-down,ctrl-up:preview-page-up,ctrl-down:preview-page-down'"
@@ -292,6 +298,7 @@ function _validate_config() {
 }
 
 function _create_default_config() {
+  # Creates a massive, fully documented default config on first run
   cat > "$PWRFZF_CONFIG_FILE" << 'EOF'
 # PWRFZF Configuration File
 # Colors and display
@@ -323,9 +330,6 @@ PWRFZF_SEARCH_NAMES_ONLY=false
 # History / Log Backend (elogv, elogfzf, genlop, qlop, log, auto)
 PWRFZF_HISTORY_CMD="elogv"
 
-# GLSA sorting: true = newest first, false = oldest first
-PWRFZF_GLSA_REVERSE=true
-
 # Preferred text editor for config files and eLogs
 # (e.g. nvim, nano, vim, kate, gedit). Leave empty to use system default ($EDITOR).
 PWRFZF_EDITOR=""
@@ -338,22 +342,103 @@ PWRFZF_CONFIG_UPDATER="cfg-update -u"
 PWRFZF_EMERGE_CMD="emerge"
 
 # Custom FZF color theme string. Leave empty for default.
+# Base scheme (dark|light|base16|bw) and/or custom colors
 PWRFZF_COLOR_THEME=""
+
+# GLSA sorting: true = newest first, false = oldest first
+PWRFZF_GLSA_REVERSE=true
 
 # Emerge behavior
 PWRFZF_USE_DEFAULT_EMERGE_OPTS=false
-# export EMERGE_DEFAULT_OPTS="$EMERGE_DEFAULT_OPTS --verbose"
 
 # Layout
 PWRFZF_PREVIEW_WINDOW="right,60%,border-left"
 
 # Privilege escalation (sudo/doas/empty for root)
 PRIV_ESC="sudo"
+
+# ==============================================================================
+# WORLD UPDATE CONFIGURATION
+# ==============================================================================
+# Lower process priority (renice/ionice) to keep system responsive
+PWRFZF_UPDATE_LOWER_PRIORITY=true
+
+# Update sys-apps/portage before @world
+PWRFZF_UPDATE_UPDATE_PORTAGE_FIRST=true
+
+# Run @preserved-rebuild after update
+PWRFZF_UPDATE_PRESERVED_REBUILD=true
+
+# Run emerge --depclean after update
+PWRFZF_UPDATE_DEPCLEAN=true
+
+# Clean portage logs older than 7 days (emaint)
+PWRFZF_UPDATE_CLEAN_LOGS=true
+
+# Run eclean packages
+PWRFZF_UPDATE_ECLEAN_PACKAGES=false
+
+# Run eclean distfiles
+PWRFZF_UPDATE_ECLEAN_DISTFILES=false
+
+# Update eix cache at the end
+PWRFZF_UPDATE_EIX_UPDATE=true
+
+# ==============================================================================
+# ADVANCED DEVELOPER SETTINGS: CUSTOM KERNEL INSTALLER
+# ==============================================================================
+# WARNING: These settings override the default Gentoo `make install` routine.
+# They are designed for highly customized setups involving manual EFI mounts,
+# direct efibootmgr manipulation, and Secure Boot signing (sbsign).
+
+# DEVELOPER: Enable Kernel & Dracut Hub (Ctrl-k) in UI (true/false)
+PWRFZF_ENABLE_KERNEL_HUB=false
+
+# Enable custom kernel installation routine (true/false)
+# Default is true for this specific system layout. Set to false to use Gentoo's installkernel.
+PWRFZF_KERNEL_USE_CUSTOM_INSTALL=true
+
+# Custom MAKEOPTS (e.g. "-j32"). If empty, falls back to make.conf MAKEOPTS
+PWRFZF_KERNEL_MAKEOPTS=""
+
+# Compiler selection (gcc or clang)
+PWRFZF_KERNEL_COMPILER="gcc"
+
+# Build the kernel in silent mode (-s)
+PWRFZF_KERNEL_SILENT_MAKE=false
+
+# Use ccache to speed up re-compilation (true/false)
+PWRFZF_KERNEL_USE_CCACHE=true
+
+# Perform 'make clean && make mrproper' and restore saved .config
+PWRFZF_KERNEL_MAKE_MRPROPER=false
+
+# Enable dracut initrd generation automatically after install (true/false)
+PWRFZF_KERNEL_USE_DRACUT=true
+
+# GUI tool to use for configuration (menuconfig, nconfig, xconfig)
+PWRFZF_KERNEL_GUI_TOOL="xconfig"
+
+# Target EFI directory name inside /efi/EFI/ (e.g. Gentoo)
+PWRFZF_KERNEL_TARGET_EFI_DIR="Gentoo"
+
+# Partition label used to automatically mount the EFI partition
+PWRFZF_KERNEL_EFI_PART_LABEL="EFI"
+
+# Path to Secure Boot Key. If empty, falls back to make.conf SECUREBOOT_SIGN_KEY
+PWRFZF_KERNEL_SIGNING_KEY="/etc/efikeys/sb-keys-2026/db.key"
+
+# Path to Secure Boot Cert. If empty, falls back to make.conf SECUREBOOT_SIGN_CERT
+PWRFZF_KERNEL_SIGNING_CERT="/etc/efikeys/sb-keys-2026/db.crt"
+
+# Kernel command line parameters (loaderopts)
+# Ensure to adapt PARTUUID and parameters to your system!
+PWRFZF_KERNEL_LOADEROPTS="root=PARTUUID=77e300af-dd46-451f-ba02-79f0107245cf rootflags=subvol=@ rootfstype=btrfs rd.vconsole.keymap=de-latin1 console=tty1 amdgpu.sg_display=0 quiet splash"
 EOF
 }
 
 function _find_privilege_escalator() {
-  if [[ -n "$PRIV_ESC" ]]; then
+  if [[ -n "${PRIV_ESC:-}" ]]; then
     _pwrfzf_verbose "Using configured privilege escalator: $PRIV_ESC"
     return
   fi
@@ -377,8 +462,8 @@ function _find_privilege_escalator() {
 }
 
 function _set_colors() {
-  if [[ "${NO_COLOR}" != "true" && "${NO_COLOR}" != "1" ]]; then
-    if [[ -n "$PWRFZF_COLOR_THEME" ]]; then
+  if [[ "${NO_COLOR:-}" != "true" && "${NO_COLOR:-}" != "1" ]]; then
+    if [[ -n "${PWRFZF_COLOR_THEME:-}" ]]; then
       pwrfzf_colortheme="$PWRFZF_COLOR_THEME"
     else
       pwrfzf_colortheme="hl:italic:#FFFF00,hl+:bold:underline:#FF0000,fg:#98A0C5,fg+:bold:underline:#FFFFFF,bg:#13172A,bg+:#0F1222,border:#75A2F7,label:bold:#75A2F7,preview-fg:bold:#C0CAF5,preview-bg:#0F1222,marker:#00FF00,gutter:#0F1222,pointer:#FF0000,query:#FF0000,info:italic:#98A0C5,spinner:#00FFFF,header:italic:#75A2F7"
@@ -398,7 +483,7 @@ function _set_colors() {
 }
 
 function _set_fx() {
-  if [[ -z ${NO_FX} ]]; then
+  if [[ -z "${NO_FX:-}" ]]; then
     pwrfzf_fx=( [Save_Title]='\x1B[22;0t' [Restore_Title]='\x1B[23;0t' )
   fi
 }
@@ -412,7 +497,7 @@ function _find_emerge() {
 }
 
 function _load_emerge_default_opts() {
-  if [[ -n "$EMERGE_DEFAULT_OPTS" ]]; then
+  if [[ -n "${EMERGE_DEFAULT_OPTS:-}" ]]; then 
     _pwrfzf_verbose "Using EMERGE_DEFAULT_OPTS from environment: $EMERGE_DEFAULT_OPTS"
     return
   fi
@@ -431,7 +516,7 @@ function _load_emerge_default_opts() {
   # Fallback manual extraction
   local sourced_opts
   if [[ -f "${PORTAGE_ETC}/make.conf" ]]; then
-    sourced_opts=$(source "${PORTAGE_ETC}/make.conf" 2>/dev/null; echo "$EMERGE_DEFAULT_OPTS")
+    sourced_opts=$(source "${PORTAGE_ETC}/make.conf" 2>/dev/null; echo "${EMERGE_DEFAULT_OPTS:-}")
     if [[ -n "$sourced_opts" ]]; then
       EMERGE_DEFAULT_OPTS="$sourced_opts"
       _pwrfzf_verbose "Loaded EMERGE_DEFAULT_OPTS from make.conf: $EMERGE_DEFAULT_OPTS"
@@ -442,7 +527,7 @@ function _load_emerge_default_opts() {
   if [[ -d "${PORTAGE_ETC}/make.conf.d" ]]; then
     for conf_file in "${PORTAGE_ETC}/make.conf.d"/*.conf; do
       [[ -f "$conf_file" ]] || continue
-      sourced_opts=$(source "$conf_file" 2>/dev/null; echo "$EMERGE_DEFAULT_OPTS")
+      sourced_opts=$(source "$conf_file" 2>/dev/null; echo "${EMERGE_DEFAULT_OPTS:-}")
       if [[ -n "$sourced_opts" ]]; then
         EMERGE_DEFAULT_OPTS="$sourced_opts"
         _pwrfzf_verbose "Loaded EMERGE_DEFAULT_OPTS from $conf_file: $EMERGE_DEFAULT_OPTS"
@@ -474,6 +559,14 @@ function _save_layout() {
 # ------------------------------------------------------------------------------
 function _print_divider() {
   echo "══════════════════════════════════════"
+}
+
+# PERFORMANCE BOOST: Cache invalidation handler
+function _clear_preview_cache() {
+  local cache_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}/pwrfzf_cache"
+  if [[ -d "$cache_dir" ]]; then
+    rm -rf "$cache_dir" 2>/dev/null
+  fi
 }
 
 # IMPORTANT: All UI functions write to >&2 (stderr) to avoid polluting stdout.
@@ -512,8 +605,7 @@ function _fzf_viewer() {
 }
 
 function _pwrfzf_keys() {
-  cat <<EOF
-KEYBINDINGS:
+  local keys_out="KEYBINDINGS:
                  TAB : Select / Multi-Select
            Shift-TAB : Unselect
               Ctrl-i : Toggle current selection
@@ -523,22 +615,30 @@ KEYBINDINGS:
               Ctrl-w : Update all world packages
               Ctrl-z : Run preserved rebuild
               Ctrl-s : Sync repositories
-              Ctrl-p : Toggle installed packages only
+              Ctrl-p : Toggle installed packages only"
+
+  if [[ "${PWRFZF_ENABLE_KERNEL_HUB:-false}" == "true" ]]; then
+    keys_out+=$'\n              Ctrl-k : System Hub (Kernel, EFI, Btrfs)'
+  fi
+
+  keys_out+=$'
               Ctrl-y : View eLogs / Emerge History
               Ctrl-o : Open Portage Config Manager
               Ctrl-/ : Change layout
               Ctrl-v : Hide/show preview
               Ctrl-l : Clear query
-               Alt-u : Run Config Updater ($PWRFZF_CONFIG_UPDATER)
+               Alt-u : Run Config Updater ('$PWRFZF_CONFIG_UPDATER')
          Alt-Up/Down : Scroll preview line-by-line
         Ctrl-Up/Down : Scroll preview page-by-page
+         Alt-p/Alt-n : Previous/Next Search History
        Alt-backspace : Clear query
             Alt-left : Delete word
               Ctrl-h : Show keybindings
                    ? : Show keybindings
               Ctrl-q : Exit
-                 ESC : Exit
-EOF
+                 ESC : Exit'
+                 
+  echo "$keys_out"
 }
 
 function _pwrfzf_help() {
@@ -610,9 +710,25 @@ function _toggle_installed() {
 }
 
 function __fzf_preview() {
+  # PERFORMANCE BOOST: Prevent zombie processes on fast scrolling by killing process group
+  trap 'trap - TERM; kill 0' INT TERM EXIT
+  
   local package_name="${1%%:*}"
   [[ -z "$package_name" ]] && return
   
+  # PERFORMANCE BOOST: Tmpfs RAM Caching for instant scrolling
+  local safe_pkg="${package_name//\//_}"
+  local cache_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}/pwrfzf_cache"
+  local cache_file="$cache_dir/$safe_pkg"
+
+  [[ ! -d "$cache_dir" ]] && mkdir -p "$cache_dir" 2>/dev/null
+
+  # Cache Hit - exec replaces the shell immediately
+  if [[ -f "$cache_file" ]]; then
+    exec cat "$cache_file"
+  fi
+
+  # Cache Miss - Generate and save to RAM via tee
   {
     eix "$package_name" 2>/dev/null
     
@@ -645,7 +761,7 @@ function __fzf_preview() {
     echo "════════════════════════════════════════════════════════════════════════════════"
     echo "INSTALLED FILES:"
     qlist "$package_name" 2>/dev/null | head -20
-  } 2>/dev/null
+  } | tee "$cache_file" 2>/dev/null
 }
 
 # ------------------------------------------------------------------------------
@@ -670,10 +786,796 @@ function _run_config_updater() {
     fi
     echo
     read -n1 -rsp "Press any key to return..." < /dev/tty
+    
+    # PERFORMANCE BOOST: Config updated, purge cache
+    _clear_preview_cache
   else
     _pwrfzf_error "Updater '$updater_cmd' not found. Please install it or change PWRFZF_CONFIG_UPDATER in pwrfzf.conf"
     read -n1 -s < /dev/tty
   fi
+}
+
+function _launch_editor() {
+  local file_path="$1"
+  local editor="${PWRFZF_EDITOR:-}"
+  local editor_cmd="${editor%% *}"
+  
+  # If the configured editor doesn't exist, fallback to robust detection
+  if ! command -v "$editor_cmd" >/dev/null 2>&1; then
+    if command -v nvim >/dev/null 2>&1; then editor="nvim"
+    elif command -v nano >/dev/null 2>&1; then editor="nano"
+    elif command -v vim >/dev/null 2>&1; then editor="vim"
+    elif command -v vi >/dev/null 2>&1; then editor="vi"
+    elif command -v gedit >/dev/null 2>&1; then editor="gedit"
+    elif command -v kate >/dev/null 2>&1; then editor="kate"
+    elif command -v leafpad >/dev/null 2>&1; then editor="leafpad"
+    else
+      _pwrfzf_error "No editor found! Please install nvim, nano, vim, or configure PWRFZF_EDITOR."
+      return 1
+    fi
+  fi
+  
+  if [[ ! -f "$file_path" ]]; then
+    ${PRIV_ESC} mkdir -p "$(dirname "$file_path")"
+    ${PRIV_ESC} touch "$file_path"
+  fi
+  
+  # Launch directly. GUI editors handle this natively without breaking the terminal.
+  if [[ $EUID -eq 0 ]]; then
+    $editor "$file_path" < /dev/tty
+  else
+    ${PRIV_ESC} $editor "$file_path" < /dev/tty
+  fi
+  
+  # PERFORMANCE BOOST: Ensure preview cache is cleared after config file changes
+  _clear_preview_cache
+  tput reset 2>/dev/null || true
+  stty sane
+}
+
+# ------------------------------------------------------------------------------
+# SYSTEM & KERNEL HUB (Advanced Configurable Builder, Bootmgr & Btrfs)
+# ------------------------------------------------------------------------------
+function _kernel_hub() {
+  local kernel_src_dir="${PWRFZF_KERNEL_DIR:-/usr/src/linux}"
+  local kernel_bck_dir="${PWRFZF_KERNEL_BCK_DIR:-/etc/kernel}"
+  
+  local kernel_missing=false
+  if ! ${PRIV_ESC} test -d "$kernel_src_dir"; then
+    kernel_missing=true
+  fi
+
+  while true; do
+    tput clear 2>/dev/null || clear
+    _print_divider
+    echo "🐧 SYSTEM & KERNEL HUB (Developer)"
+    _print_divider
+    
+    if [[ "$kernel_missing" == "false" ]]; then
+      local active_kernel src_version
+      active_kernel=$(uname -r)
+      src_version=$(${PRIV_ESC} make -C "$kernel_src_dir" -s kernelrelease 2>/dev/null || echo "Unknown")
+
+      echo "Running Kernel: $active_kernel"
+      echo "Source  Kernel: $src_version ($kernel_src_dir)"
+      
+      if [[ "$active_kernel" != "$src_version" ]]; then
+        echo -e "\n⚠️  ${pwrfzf_color[Yellow]}Version mismatch detected! A new kernel might be waiting to be built.${pwrfzf_color[Reset]}"
+      fi
+      
+      if [[ "${PWRFZF_KERNEL_USE_CUSTOM_INSTALL:-false}" == "true" ]]; then
+        echo -e "\n🔧 ${pwrfzf_color[Cyan]}Advanced Custom Kernel Installer enabled (Check pwrfzf.conf).${pwrfzf_color[Reset]}"
+      else
+        echo -e "\n📦 ${pwrfzf_color[Green]}Standard sys-kernel/installkernel hooks enabled.${pwrfzf_color[Reset]}"
+      fi
+    else
+      echo -e "\n⚠️  ${pwrfzf_color[Yellow]}Kernel source directory not found at: $kernel_src_dir${pwrfzf_color[Reset]}"
+      echo -e "📦 Kernel compilation features are unavailable.\n"
+    fi
+
+    echo
+    local gui_tool="${PWRFZF_KERNEL_GUI_TOOL:-xconfig}"
+    local action
+    action=$(echo -e "─── KERNEL MANAGEMENT ───\n1. 📥 Extract .config from running system (zcat)\n2. ⚙️  Run 'make olddefconfig'\n3. 🛠️  Configure Kernel (${gui_tool})\n4. 🚀 Compile and Install Kernel\n5. 📦 Rebuild Out-Of-Tree Modules (@module-rebuild)\n─── BOOT & SYSTEM ───\n6. 🥾 EFI Boot Manager (efibootmgr menu)\n7. 📸 Btrfs Snapshot Rollback\n8. Back" | fzf \
+      --prompt="System Action> " \
+      --border='double' \
+      --border-label="┨ System Hub ┠" \
+      --color="${pwrfzf_colortheme}")
+
+    case "$action" in
+      *Extract*.config*)
+        if [[ "$kernel_missing" == "true" ]]; then _pwrfzf_error "Kernel source not found!"; read -n1 -s < /dev/tty; continue; fi
+        tput clear 2>/dev/null || clear
+        _print_divider
+        echo "Extracting kernel config from running system..."
+        _print_divider
+        if ${PRIV_ESC} test -f "$kernel_src_dir/.config"; then
+          read -rp "A .config already exists in $kernel_src_dir. Overwrite? (y/N) " overwrite < /dev/tty
+          if [[ ! "${overwrite,,}" =~ ^y(es)?$ ]]; then
+            echo "Cancelled."
+            read -n1 -rsp "Press any key..." < /dev/tty
+            continue
+          fi
+        fi
+        if ${PRIV_ESC} test -f /proc/config.gz; then
+          ${PRIV_ESC} bash -c "zcat /proc/config.gz > $kernel_src_dir/.config"
+          _pwrfzf_success "Config successfully extracted to $kernel_src_dir/.config"
+        else
+          _pwrfzf_error "/proc/config.gz not found! Ensure IKCONFIG_PROC is enabled in the active kernel."
+        fi
+        read -n1 -rsp "Press any key..." < /dev/tty
+        ;;
+      *olddefconfig*)
+        if [[ "$kernel_missing" == "true" ]]; then _pwrfzf_error "Kernel source not found!"; read -n1 -s < /dev/tty; continue; fi
+        tput clear 2>/dev/null || clear
+        echo "Running make olddefconfig..."
+        
+        # Universal fallback if .config is missing
+        if ! ${PRIV_ESC} test -f "$kernel_src_dir/.config"; then
+           if [[ "${PWRFZF_KERNEL_USE_CUSTOM_INSTALL:-false}" == "true" ]] && ${PRIV_ESC} test -f "$kernel_bck_dir/kernel-config-$src_version"; then
+             echo "Restoring saved config from backup: $kernel_bck_dir/kernel-config-$src_version..."
+             ${PRIV_ESC} cp -v "$kernel_bck_dir/kernel-config-$src_version" "$kernel_src_dir/.config"
+           else
+             echo "No .config found in source dir. Extracting config from running system..."
+             if ${PRIV_ESC} test -f /proc/config.gz; then
+               ${PRIV_ESC} bash -c "zcat /proc/config.gz > $kernel_src_dir/.config"
+               echo "✅ Extracted successfully."
+             else
+               _pwrfzf_warning "/proc/config.gz not found. make olddefconfig may use defaults."
+             fi
+           fi
+        fi
+        
+        ${PRIV_ESC} make -C "$kernel_src_dir" olddefconfig < /dev/tty
+        read -n1 -rsp "Press any key..." < /dev/tty
+        ;;
+      *Configure*)
+        if [[ "$kernel_missing" == "true" ]]; then _pwrfzf_error "Kernel source not found!"; read -n1 -s < /dev/tty; continue; fi
+        tput clear 2>/dev/null || clear
+        echo "Launching $gui_tool (Preserving X11/Wayland display environment)..."
+        if [[ $EUID -eq 0 ]]; then
+          make -C "$kernel_src_dir" "$gui_tool" < /dev/tty
+        else
+          ${PRIV_ESC} env DISPLAY="${DISPLAY:-:0}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID}" make -C "$kernel_src_dir" "$gui_tool" < /dev/tty
+        fi
+        read -n1 -rsp "Press any key..." < /dev/tty
+        ;;
+      *Compile*Install*)
+        if [[ "$kernel_missing" == "true" ]]; then _pwrfzf_error "Kernel source not found!"; read -n1 -s < /dev/tty; continue; fi
+        tput clear 2>/dev/null || clear
+        if [[ "${PWRFZF_KERNEL_USE_CUSTOM_INSTALL:-false}" == "true" ]]; then
+          _custom_kernel_install_routine "$kernel_src_dir" "$src_version" "$kernel_bck_dir"
+        else
+          _standard_kernel_install_routine "$kernel_src_dir"
+        fi
+        ;;
+      *module-rebuild*)
+        if [[ "$kernel_missing" == "true" ]]; then _pwrfzf_error "Kernel source not found!"; read -n1 -s < /dev/tty; continue; fi
+        tput clear 2>/dev/null || clear
+        echo "Rebuilding out-of-tree modules..."
+        ${EMERGE_CMD} -1O @module-rebuild < /dev/tty
+        ${PRIV_ESC} sync
+        read -n1 -rsp "Press any key..." < /dev/tty
+        ;;
+      *EFI*Boot*Manager*)
+        _efibootmgr_menu
+        ;;
+      *Btrfs*Snapshot*)
+        _btrfs_snapshot_menu
+        ;;
+      *Back*|"")
+        break
+        ;;
+      *)
+        continue
+        ;;
+    esac
+  done
+}
+
+function _standard_kernel_install_routine() {
+  local kernel_src_dir="$1"
+  local make_opts="${PWRFZF_KERNEL_MAKEOPTS:-}"
+  
+  if [[ -z "$make_opts" ]]; then
+    if command -v portageq >/dev/null 2>&1; then
+      make_opts=$(portageq envvar MAKEOPTS 2>/dev/null)
+    else
+      make_opts=$(${PRIV_ESC} grep -E '^[[:space:]]*MAKEOPTS=' "${PORTAGE_ETC}/make.conf" 2>/dev/null | cut -d'=' -f2- | tr -d '"'\''')
+    fi
+  fi
+
+  _print_divider
+  echo "Starting Standard Gentoo Kernel Compilation..."
+  echo "Using MAKEOPTS: ${make_opts:-Default}"
+  _print_divider
+  
+  local t_start=$(date +%s)
+
+  if ${PRIV_ESC} bash -c "cd $kernel_src_dir && make $make_opts && make $make_opts modules_install && make install"; then
+     local t_end=$(date +%s)
+     local t_total=$((t_end - t_start))
+     echo "================================================="
+     echo "Kernel build completed in: $((t_total / 60)) minutes and $((t_total % 60)) seconds."
+     echo "================================================="
+     _pwrfzf_success "Kernel installed successfully!"
+     echo "Note: sys-kernel/installkernel handled initramfs and bootloader."
+  else
+     _pwrfzf_error "Kernel compilation or installation failed."
+  fi
+  
+  echo
+  read -rp "Do you want to rebuild out-of-tree modules (@module-rebuild) now? (y/N) " reb_ans < /dev/tty
+  if [[ "${reb_ans,,}" == "y" || "${reb_ans,,}" == "yes" ]]; then
+     echo "Rebuilding modules..."
+     ${EMERGE_CMD} -1O @module-rebuild < /dev/tty
+     ${PRIV_ESC} sync
+     _pwrfzf_success "Module rebuild complete."
+  fi
+  echo
+  read -n1 -rsp "Press any key..." < /dev/tty
+}
+
+function _custom_kernel_install_routine() {
+  local kernel_src_dir="$1"
+  local src_version="$2"
+  local kernel_bck_dir="$3"
+  
+  # Matching EXACTLY the original script variables
+  local NEW=$(${PRIV_ESC} make -C "$kernel_src_dir" -s kernelversion 2>/dev/null || echo "")
+  local NEW_RELEASE=$(${PRIV_ESC} make -C "$kernel_src_dir" -s kernelrelease 2>/dev/null || echo "")
+  
+  _print_divider
+  echo "Starting ADVANCED Custom Kernel Compilation ($NEW_RELEASE)..."
+  _print_divider
+
+  local compiler="${PWRFZF_KERNEL_COMPILER:-gcc}"
+  local cc_prefix=""
+  local llvm_var=""
+  
+  local make_opts="${PWRFZF_KERNEL_MAKEOPTS:-}"
+  if [[ -z "$make_opts" ]]; then
+    if command -v portageq >/dev/null 2>&1; then
+      make_opts=$(portageq envvar MAKEOPTS 2>/dev/null)
+    else
+      make_opts=$(${PRIV_ESC} grep -E '^[[:space:]]*MAKEOPTS=' "${PORTAGE_ETC}/make.conf" 2>/dev/null | cut -d'=' -f2- | tr -d '"'\''')
+    fi
+  fi
+  
+  if [[ "${PWRFZF_KERNEL_SILENT_MAKE:-false}" == "true" ]]; then
+    make_opts="$make_opts -s"
+  fi
+  
+  echo ">> Using MAKEOPTS: ${make_opts:-Default}"
+  
+  if [[ "${PWRFZF_KERNEL_USE_CCACHE:-false}" == "true" ]] && command -v ccache >/dev/null 2>&1; then
+    cc_prefix="ccache "
+    echo ">> ccache enabled."
+  fi
+
+  if [[ "$compiler" == "clang" ]]; then
+    echo ">> Using Clang compiler."
+    export CC="${cc_prefix}clang"
+    export LD=ld.lld AR=llvm-ar NM=llvm-nm STRIP=llvm-strip
+    llvm_var="LLVM=1 LLVM_IAS=1"
+    
+    echo ">> Setting FRAME_WARN to 4096 for Clang..."
+    ${PRIV_ESC} bash -c "cd $kernel_src_dir && scripts/config --set-val FRAME_WARN 4096"
+  else
+    echo ">> Using GCC compiler."
+    export CC="${cc_prefix}gcc"
+    unset LD AR NM STRIP
+  fi
+
+  if [[ "${PWRFZF_KERNEL_MAKE_MRPROPER:-false}" == "true" ]]; then
+    echo ">> Running make clean && make mrproper while saving and restoring .config."
+    ${PRIV_ESC} bash -c "
+      if [ -f $kernel_src_dir/.config ]; then
+          mv $kernel_src_dir/.config $kernel_src_dir/.config.save
+          make $make_opts $llvm_var clean && make $make_opts $llvm_var mrproper
+          mv $kernel_src_dir/.config.save $kernel_src_dir/.config
+      fi
+    "
+  fi
+
+  # Backup old config
+  if ${PRIV_ESC} test -f "$kernel_src_dir/.config"; then
+     ${PRIV_ESC} mkdir -p "$kernel_bck_dir"
+     ${PRIV_ESC} cp "$kernel_src_dir/.config" "$kernel_bck_dir/kernel-config-$NEW_RELEASE-$(date +%d.%m.%Y-%H%M%S)" 2>/dev/null || true
+  fi
+
+  # 1. Mount EFI (Original User Logic with Label)
+  local efi_label="${PWRFZF_KERNEL_EFI_PART_LABEL:-EFI}"
+  
+  if ! ${PRIV_ESC} test -d /efi; then
+    ${PRIV_ESC} mkdir -p /efi
+    if ${PRIV_ESC} mount -L "$efi_label" /efi; then
+      echo ">> Mounted EFI partition ($efi_label) to /efi."
+    else
+      _pwrfzf_error "Failed to mount EFI partition $efi_label."
+      return 1
+    fi
+  fi
+
+  local t_start=$(date +%s)
+
+  # 2. Compile Kernel
+  echo ">> Compiling kernel..."
+  if ! ${PRIV_ESC} bash -c "cd $kernel_src_dir && make $make_opts $llvm_var"; then
+     _pwrfzf_error "Kernel compilation failed."
+     return 1
+  fi
+
+  # 3. Clean old modules and install new ones
+  echo ">> Cleaning old modules and installing new ones..."
+  ${PRIV_ESC} bash -c "
+    if [ -d /lib/modules/$NEW_RELEASE ]; then
+      find /lib/modules/$NEW_RELEASE -type d -exec rm -rf {} + 2>/dev/null || true
+    fi
+    cd $kernel_src_dir && unset INSTALL_PATH && make $make_opts $llvm_var modules_install
+  "
+  
+  # AUTO MODULE REBUILD (Before EFI rotation, just in case)
+  echo ">> Rebuilding out-of-tree modules (@module-rebuild)..."
+  ${EMERGE_CMD} -1O @module-rebuild < /dev/tty
+
+  # 4. Prepare EFI Target
+  local target_efi_dir="${PWRFZF_KERNEL_TARGET_EFI_DIR:-Gentoo}"
+  local target_path="/efi/EFI/$target_efi_dir"
+  ${PRIV_ESC} mkdir -p "$target_path"
+  
+  # Remove old EFI kernel files matching $NEW
+  ${PRIV_ESC} bash -c "find $target_path -type f -name \"*$NEW*\" -delete 2>/dev/null || true"
+  ${PRIV_ESC} cp "$kernel_src_dir/arch/x86/boot/bzImage" "$target_path/vmlinuz-$NEW"
+
+  # 5. Dracut Initramfs
+  local base_loaderopts="${PWRFZF_KERNEL_LOADEROPTS:-}"
+  local final_loaderopts="$base_loaderopts"
+  if [[ "${PWRFZF_KERNEL_USE_DRACUT:-false}" == "true" ]]; then
+    echo ">> Generating initramfs-${NEW}.img with dracut..."
+    if ${PRIV_ESC} dracut --force --hostonly --install "/lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s" "$target_path/initramfs-${NEW}.img" "$NEW_RELEASE" < /dev/tty; then
+      final_loaderopts="initrd=\\EFI\\$target_efi_dir\\initramfs-${NEW}.img $base_loaderopts"
+    else
+      _pwrfzf_error "Dracut failed."
+      return 1
+    fi
+  fi
+
+  # 6. Secure Boot Signing
+  echo ">> Signing kernel for Secure Boot..."
+  local sign_key="${PWRFZF_KERNEL_SIGNING_KEY:-}"
+  local sign_cert="${PWRFZF_KERNEL_SIGNING_CERT:-}"
+  
+  # Fallback to make.conf if not set in config OR if file doesn't exist
+  if [[ -z "$sign_key" ]] || ! ${PRIV_ESC} test -f "$sign_key"; then
+    sign_key=$(${PRIV_ESC} grep '^SECUREBOOT_SIGN_KEY=' /etc/portage/make.conf 2>/dev/null | cut -d'=' -f2 | tr -d '\"')
+  fi
+  if [[ -z "$sign_cert" ]] || ! ${PRIV_ESC} test -f "$sign_cert"; then
+    sign_cert=$(${PRIV_ESC} grep '^SECUREBOOT_SIGN_CERT=' /etc/portage/make.conf 2>/dev/null | cut -d'=' -f2 | tr -d '\"')
+  fi
+  
+  if [[ -n "$sign_key" && -n "$sign_cert" ]] && ${PRIV_ESC} test -f "$sign_key" && ${PRIV_ESC} test -f "$sign_cert"; then
+    if ${PRIV_ESC} sbsign --key "$sign_key" --cert "$sign_cert" --output "$target_path/vmlinuz-signed-${NEW}.efi" "$target_path/vmlinuz-${NEW}"; then
+      ${PRIV_ESC} mv -f "$target_path/vmlinuz-signed-${NEW}.efi" "$target_path/vmlinuz-${NEW}.efi"
+      ${PRIV_ESC} rm -f "$target_path/vmlinuz-${NEW}"
+      echo ">> Kernel signed successfully."
+    else
+      _pwrfzf_error "sbsign failed. Ensure app-crypt/sbsigntools is installed."
+      return 1
+    fi
+  else
+    _pwrfzf_warning "Secure Boot keys not found or invalid path. Skipping signing."
+    ${PRIV_ESC} mv -f "$target_path/vmlinuz-${NEW}" "$target_path/vmlinuz-${NEW}.efi"
+  fi
+
+  # 7. EFI Bootmgr Rotation (Exact Original Logic via temporary execution script)
+  if command -v efibootmgr >/dev/null 2>&1; then
+    echo ">> Updating efibootmgr..."
+    
+    local efi_disk="/dev/sda"
+    local efi_part="1"
+    # Fallback disk detection if needed, but original used by-label
+    local efi_detected
+    efi_detected=$(${PRIV_ESC} lsblk -o PKNAME,NAME,LABEL -r 2>/dev/null | awk -v lbl="$efi_label" '$3 == lbl {print $0; exit}')
+    if [[ -n "$efi_detected" ]]; then
+        local pk=$(echo "$efi_detected" | awk '{print $1}')
+        local nm=$(echo "$efi_detected" | awk '{print $2}')
+        if [[ "$pk" == "$nm" || -z "$pk" ]]; then
+            pk=$(echo "$nm" | sed 's/[0-9]*$//') 
+            pk=${pk%p} 
+        fi
+        efi_disk="/dev/$pk"
+        efi_part="${nm##*[a-zA-Z]}" 
+    fi
+
+    local efi_script="/tmp/pwrfzf_efi_update_$$.sh"
+    cat << EOF > "$efi_script"
+#!/bin/bash
+TARGET_EFI_DIR="$target_efi_dir"
+NEW="$NEW"
+EFI_PARTITION_LABEL="$efi_label"
+LOADEROPTS="$base_loaderopts"
+FINAL_LOADEROPTS="$final_loaderopts"
+EOF
+    cat << 'EOF' >> "$efi_script"
+# 1. PLATZ MACHEN: Den alten Slot 0000 zwingend leeren!
+efibootmgr -b 0000 -B > /dev/null 2>&1 || true
+
+# 2. AUFRÄUMEN: Lösche alte Fehlschläge des NEUEN Kernels
+BOOT_IDS=$(efibootmgr | grep "${TARGET_EFI_DIR}-${NEW}" | awk '{print $1}' | sed 's/Boot\(.*\)\*/\1/')
+for b in $BOOT_IDS; do
+    efibootmgr -b "$b" -B > /dev/null 2>&1
+done
+
+# 3. NEUEN Kernel schreiben (MIT -I 0)
+efibootmgr -c -d "/dev/disk/by-label/${EFI_PARTITION_LABEL}" -p 1 -L "${TARGET_EFI_DIR}-${NEW}" -l "\\EFI\\${TARGET_EFI_DIR}\\vmlinuz-${NEW}.efi" -I 0 -u " ${FINAL_LOADEROPTS}" > /dev/null
+
+# 4. JETZT ERST Backup erstellen
+OLD_EFI=$(ls -1t /efi/EFI/${TARGET_EFI_DIR}/vmlinuz-*.efi 2>/dev/null | grep -v "${NEW}" | head -n 1)
+if [[ -n "$OLD_EFI" ]]; then 
+    CLEAN_NAME=$(basename "$OLD_EFI" | sed 's/vmlinuz-//;s/\.efi//')
+    FINAL_LABEL="${TARGET_EFI_DIR}-${CLEAN_NAME}"
+    
+    # AUFRÄUMEN (löscht alte Backups)
+    BOOT_IDS=$(efibootmgr | grep "${FINAL_LABEL}" | awk '{print $1}' | sed 's/Boot\(.*\)\*/\1/')
+    for b in $BOOT_IDS; do
+        efibootmgr -b "$b" -B > /dev/null 2>&1
+    done
+    
+    OLD_LOADEROPTS="initrd=\\EFI\\${TARGET_EFI_DIR}\\initramfs-${CLEAN_NAME}.img ${LOADEROPTS}"
+    efibootmgr -c -d "/dev/disk/by-label/${EFI_PARTITION_LABEL}" -p 1 -L "${FINAL_LABEL}" -l "\\EFI\\${TARGET_EFI_DIR}\\vmlinuz-${CLEAN_NAME}.efi" -u " $OLD_LOADEROPTS" > /dev/null
+fi
+
+# FINALER SORTIER-SCHRITT
+ORDER=$(efibootmgr | awk -F'*' '/Boot[0-9A-F]{4}/ {
+    gsub(/.*Boot/, "", $1)
+    id = $1
+    sub(/^0+/, "", id)
+    if (id == "") id = "0"
+    printf "%s%s", (c++ ? "," : ""), id
+}')
+efibootmgr -uo "$ORDER" > /dev/null
+EOF
+    ${PRIV_ESC} chmod +x "$efi_script"
+    ${PRIV_ESC} "$efi_script"
+    ${PRIV_ESC} rm -f "$efi_script"
+  fi
+
+  local t_end=$(date +%s)
+  local t_total=$((t_end - t_start))
+  echo "================================================="
+  echo "Kernel build completed in: $((t_total / 60)) minutes and $((t_total % 60)) seconds."
+  echo "================================================="
+  _pwrfzf_success "Advanced Kernel Installation complete."
+  echo
+  read -n1 -rsp "Press any key..." < /dev/tty
+}
+
+# ------------------------------------------------------------------------------
+# EFIBOOTMGR MENU (Sub-Menu of Kernel Hub)
+# ------------------------------------------------------------------------------
+function _efibootmgr_menu() {
+  if ! command -v efibootmgr >/dev/null 2>&1; then
+    _pwrfzf_error "efibootmgr not found."
+    read -n1 -s < /dev/tty
+    return
+  fi
+
+  while true; do
+    tput clear 2>/dev/null || clear
+    _print_divider
+    echo "🥾 EFI BOOT MANAGER"
+    _print_divider
+    ${PRIV_ESC} efibootmgr | head -n 3
+    echo
+
+    local action
+    action=$(echo -e "1. 👁️  View Full Details (efibootmgr -u)\n2. 🔄 Change Boot Order\n3. ➕ Create New Entry\n4. 📝 Edit / Move Entry (Change ID/Params)\n5. 👯 Clone / Backup Entry\n6. 🗑️  Delete Entry\n7. Back" | fzf \
+      --prompt="EFI Action> " --border='double' --border-label="┨ EFIBOOTMGR ┠" --color="${pwrfzf_colortheme}")
+
+    case "$action" in
+      *View*)
+        ${PRIV_ESC} efibootmgr -u | _fzf_viewer "EFI Boot Entries"
+        ;;
+      *Change*Order*)
+        local current_order
+        current_order=$(${PRIV_ESC} efibootmgr | grep "^BootOrder:" | awk '{print $2}')
+        echo "Current BootOrder: $current_order"
+        local new_order
+        # Fix: Read with -r prevents backslash escaping and empty entry aborts menu
+        read -r -e -i "$current_order" -p "New BootOrder (Clear & Enter to abort): " new_order < /dev/tty
+        if [[ -n "$new_order" && "$new_order" != "$current_order" ]]; then
+          ${PRIV_ESC} efibootmgr -o "$new_order" >/dev/null
+          _pwrfzf_success "BootOrder updated."
+          read -n1 -rsp "Press any key..." < /dev/tty
+        fi
+        ;;
+      *Create*)
+        _efi_create_edit_entry "create" ""
+        ;;
+      *Edit*Move*)
+        local selected
+        selected=$(${PRIV_ESC} efibootmgr | grep "^Boot[0-9]" | fzf --prompt="Select Entry to Edit/Move> " --border='double' --color="${pwrfzf_colortheme}")
+        if [[ -n "$selected" ]]; then
+           local old_id=$(echo "$selected" | grep -oE "^Boot[0-9A-F]*" | sed 's/Boot//')
+           _efi_create_edit_entry "edit" "$old_id"
+        fi
+        ;;
+      *Clone*)
+        local selected
+        selected=$(${PRIV_ESC} efibootmgr | grep "^Boot[0-9]" | fzf --prompt="Select Entry to Backup> " --border='double' --color="${pwrfzf_colortheme}")
+        if [[ -n "$selected" ]]; then
+           local old_id=$(echo "$selected" | grep -oE "^Boot[0-9A-F]*" | sed 's/Boot//')
+           _efi_create_edit_entry "clone" "$old_id"
+        fi
+        ;;
+      *Delete*)
+        local selected
+        selected=$(${PRIV_ESC} efibootmgr | grep "^Boot[0-9]" | fzf --multi --prompt="Select Entries to Delete> " --border='double' --color="${pwrfzf_colortheme}")
+        if [[ -n "$selected" ]]; then
+           echo "$selected" | while read -r line; do
+              local del_id=$(echo "$line" | grep -oE "^Boot[0-9A-F]*" | sed 's/Boot//')
+              echo "Deleting Boot$del_id..."
+              ${PRIV_ESC} efibootmgr -b "$del_id" -B >/dev/null 2>&1
+           done
+           _pwrfzf_success "Deletion complete."
+           read -n1 -rsp "Press any key..." < /dev/tty
+        fi
+        ;;
+      *Back*|"")
+        break
+        ;;
+    esac
+  done
+}
+
+function _efi_create_edit_entry() {
+  local mode="$1" # "create", "edit", "clone"
+  local old_id="$2"
+
+  local efi_disk="/dev/sda"
+  local efi_part="1"
+  local efi_label="Gentoo"
+  local efi_loader="/EFI/Gentoo/vmlinuz.efi"
+  local efi_opts=""
+  local efi_id="auto"
+
+  # Only populate default boot options on a completely new creation
+  if [[ "$mode" == "create" ]]; then
+     efi_opts="${PWRFZF_KERNEL_LOADEROPTS:-}"
+  fi
+
+  # Dynamic disk/part detection for defaults based on lsblk (supports NVMe)
+  local efi_detected
+  efi_detected=$(${PRIV_ESC} lsblk -o PKNAME,NAME,LABEL -r 2>/dev/null | awk -v lbl="${PWRFZF_KERNEL_EFI_PART_LABEL:-EFI}" '$3 == lbl {print $0; exit}')
+  if [[ -n "$efi_detected" ]]; then
+      local pk=$(echo "$efi_detected" | awk '{print $1}')
+      local nm=$(echo "$efi_detected" | awk '{print $2}')
+      if [[ "$pk" == "$nm" || -z "$pk" ]]; then
+          pk=$(echo "$nm" | sed 's/[0-9]*$//') 
+          pk=${pk%p} 
+      fi
+      efi_disk="/dev/$pk"
+      efi_part="${nm##*[a-zA-Z]}" 
+  fi
+
+  if [[ -n "$old_id" ]]; then
+      local raw_entry
+      # SAFE REGEX EXTRACTION: We completely bypass Bash Regex matching to avoid syntax errors
+      raw_entry=$(${PRIV_ESC} efibootmgr -u | grep -E "^Boot${old_id}\*?\b")
+      if [[ -n "$raw_entry" ]]; then
+          local ext_label ext_loader ext_opts ext_part
+          
+          # Safely use printf to prevent Bash from interpreting backslashes (\E) as Escape sequences!
+          ext_label=$(printf "%s\n" "$raw_entry" | sed -E 's/^Boot[0-9A-F]+\*?[[:space:]]+//' | sed -E 's/[[:space:]]+(HD|PciRoot|BBS|VenHw|Fv|VenMsg|Ctrl)\(.*//')
+          
+          # Extract the File/FilePath part safely by cutting everything until the closing parenthesis
+          local ext_loader_opts
+          ext_loader_opts=$(printf "%s\n" "$raw_entry" | sed 's/.*)[/\\]/\//')
+          
+          ext_loader=$(printf "%s\n" "$ext_loader_opts" | awk '{print $1}')
+          
+          # Clean trailing windows UTF-16 garbage after .efi
+          ext_loader=$(printf "%s\n" "$ext_loader" | sed -E 's/(\.efi|\.EFI).*/\1/i')
+          
+          # Options are everything after the first space. If no space exists, it will be safely empty.
+          ext_opts=$(printf "%s\n" "$ext_loader_opts" | awk '{$1=""; print $0}' | sed -E 's/^[[:space:]]*//')
+          
+          if [[ "${ext_loader^^}" == *"BOOTMGFW.EFI"* ]]; then
+             ext_opts=""
+          fi
+
+          # Transform ANY backslash to forward slash for user editing, and squeeze multiple slashes to one
+          efi_loader="${ext_loader//\\//}"
+          while [[ "$efi_loader" == *//* ]]; do efi_loader="${efi_loader//\/\//\/}"; done
+          [[ "$efi_loader" != /* ]] && efi_loader="/$efi_loader"
+          
+          efi_opts="$ext_opts"
+          efi_label="$ext_label"
+          
+          ext_part=$(printf "%s\n" "$raw_entry" | grep -oE 'HD\([0-9]+,' | tr -d 'HD(,')
+          [[ -n "$ext_part" ]] && efi_part="$ext_part"
+      fi
+  fi
+
+  tput clear 2>/dev/null || clear
+  _print_divider
+  if [[ "$mode" == "edit" ]]; then
+     echo "📝 EDIT/MOVE BOOT ENTRY (Boot$old_id)"
+     echo "Note: EFI entries cannot be edited directly. We will create a new one and delete the old."
+  elif [[ "$mode" == "clone" ]]; then
+     echo "👯 CLONE BOOT ENTRY (Boot$old_id)"
+     efi_label="Backup-of-${efi_label}"
+  else
+     echo "➕ CREATE NEW BOOT ENTRY"
+  fi
+  _print_divider
+
+  # Use read -r to prevent bash from stripping backslashes during user input!
+  read -r -e -i "$efi_disk" -p "Disk (Clear & Enter to abort): " efi_disk < /dev/tty
+  [[ -z "$efi_disk" ]] && return
+  read -r -e -i "$efi_part" -p "Partition Number: " efi_part < /dev/tty
+  read -r -e -i "$efi_label" -p "Label: " efi_label < /dev/tty
+  read -r -e -i "$efi_loader" -p "Loader Path (use /): " efi_loader < /dev/tty
+  read -r -e -i "$efi_opts" -p "Boot Options: " efi_opts < /dev/tty
+  read -r -e -i "auto" -p "Target Boot ID (e.g. 0005) or 'auto': " efi_id < /dev/tty
+
+  # Transform forward slash back to EXACTLY ONE backslash for efibootmgr
+  efi_loader="${efi_loader//\//\\}"
+  while [[ "$efi_loader" == *\\\\* ]]; do efi_loader="${efi_loader//\\\\/\\}"; done
+  [[ "$efi_loader" != \\* ]] && efi_loader="\\$efi_loader"
+
+  echo
+  _print_divider
+  echo "SUMMARY:"
+  printf "Disk: %s, Part: %s\n" "$efi_disk" "$efi_part"
+  printf "Label: %s\n" "$efi_label"
+  printf "Loader: %s\n" "$efi_loader"
+  printf "Options: %s\n" "$efi_opts"
+  printf "Target ID: %s\n" "$efi_id"
+  if [[ "$mode" == "edit" ]]; then
+    echo "Action: CREATE new, then DELETE Boot$old_id"
+  fi
+  _print_divider
+
+  local confirm
+  read -rp "Proceed? (y/N): " confirm < /dev/tty
+  if [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]]; then
+     if [[ "$efi_id" != "auto" ]]; then
+        ${PRIV_ESC} efibootmgr -b "$efi_id" -B >/dev/null 2>&1
+     fi
+
+     local cmd=("efibootmgr" "-c" "-d" "$efi_disk" "-p" "$efi_part" "-L" "$efi_label" "-l" "$efi_loader")
+     
+     if [[ -n "$efi_opts" ]]; then
+         local final_opts="$efi_opts"
+         final_opts="${final_opts#"${final_opts%%[![:space:]]*}"}" # strip leading spaces
+         final_opts=" $final_opts" # enforce exact single leading space
+         cmd+=("-u" "$final_opts")
+     fi
+     
+     [[ "$efi_id" != "auto" ]] && cmd+=("-I" "$efi_id")
+
+     if ${PRIV_ESC} "${cmd[@]}" >/dev/null; then
+        _pwrfzf_success "Entry created successfully."
+        if [[ "$mode" == "edit" && -n "$old_id" && "$old_id" != "$efi_id" ]]; then
+           ${PRIV_ESC} efibootmgr -b "$old_id" -B >/dev/null 2>&1
+           _pwrfzf_success "Old entry Boot$old_id deleted."
+        fi
+     else
+        _pwrfzf_error "Failed to create entry."
+     fi
+  else
+     echo "Cancelled."
+  fi
+  read -n1 -rsp "Press any key..." < /dev/tty
+}
+
+# ------------------------------------------------------------------------------
+# BTRFS SNAPSHOT MENU
+# ------------------------------------------------------------------------------
+function _btrfs_snapshot_menu() {
+  # Pre-auth sudo to avoid FZF breaking when asking for password in background
+  if [[ -n "${PRIV_ESC:-}" ]]; then
+    ${PRIV_ESC} true < /dev/tty || return
+  fi
+
+  if ! command -v snapper >/dev/null 2>&1; then
+    _pwrfzf_error "snapper is not installed or not in PATH."
+    read -n1 -s < /dev/tty
+    return
+  fi
+
+  local config_target="root"
+  if ${PRIV_ESC} snapper -c home list >/dev/null 2>&1; then
+    local target_choice
+    tput clear 2>/dev/null || clear
+    _print_divider > /dev/tty
+    echo -e "Available Btrfs configs:\n1) root (System)\n2) home (User Data)" > /dev/tty
+    _print_divider > /dev/tty
+    read -n1 -rp "Select config (1/2): " target_choice < /dev/tty
+    echo > /dev/tty
+    if [[ "$target_choice" == "2" ]]; then
+      config_target="home"
+    fi
+  fi
+
+  if ! ${PRIV_ESC} snapper -c "$config_target" list >/dev/null 2>&1; then
+    _pwrfzf_error "Snapper '$config_target' config not found or permission denied."
+    read -n1 -s < /dev/tty
+    return
+  fi
+
+  while true; do
+    local snapshots
+    # Filter header. Snapper list outputs header lines, we ignore them via tail.
+    snapshots=$(${PRIV_ESC} snapper -c "$config_target" list 2>/dev/null | tail -n +3)
+    
+    if [[ -z "$snapshots" ]]; then
+      _pwrfzf_warning "No snapshots found for $config_target."
+      read -n1 -s < /dev/tty
+      break
+    fi
+
+    local selected
+    selected=$(echo "$snapshots" | fzf \
+      --tac \
+      --header="Btrfs Snapshots ($config_target) | ENTER: Rollback | ESC: Exit" \
+      --preview="bash -c '\"${BASH_SOURCE[0]}\" _snapper_preview \"$config_target\" \"{1}\"'" \
+      --preview-window="right:60%:wrap" \
+      --border='double' --border-label="┨ Btrfs Rollback ┠" --color="${pwrfzf_colortheme}")
+
+    [[ -z "$selected" ]] && break
+
+    # Extract ID (first space-separated column, ignoring any layout pipes)
+    local snap_id
+    snap_id=$(echo "$selected" | awk '{print $1}' | tr -d '│ ')
+    
+    if [[ -n "$snap_id" ]]; then
+      tput clear 2>/dev/null || clear
+      _print_divider > /dev/tty
+      echo "⚠️  WARNING: BTRFS ROLLBACK INITIATED" > /dev/tty
+      echo "Target Config: $config_target" > /dev/tty
+      echo "Target Snapshot ID: $snap_id" > /dev/tty
+      echo > /dev/tty
+      echo "This will rollback the '$config_target' filesystem to snapshot #$snap_id." > /dev/tty
+      echo "A reboot may be required afterwards." > /dev/tty
+      _print_divider > /dev/tty
+      
+      local confirm
+      read -rp "Type 'ROLLBACK' to confirm: " confirm < /dev/tty
+      if [[ "$confirm" == "ROLLBACK" ]]; then
+        ${PRIV_ESC} snapper -c "$config_target" rollback "$snap_id" < /dev/tty
+        _pwrfzf_success "Rollback configured successfully." > /dev/tty
+      else
+        _pwrfzf_warning "Rollback cancelled." > /dev/tty
+      fi
+      read -n1 -rsp "Press any key to return..." < /dev/tty
+    fi
+  done
+}
+
+function _snapper_preview() {
+  local config_target="$1"
+  local raw_input="$2"
+  [[ -z "$raw_input" || -z "$config_target" ]] && return
+  
+  # Extract snapshot ID (First word of the string)
+  local snap_id
+  snap_id=$(echo "$raw_input" | awk '{print $1}' | tr -d '│ ')
+
+  echo "=== SNAPSHOT INFO (#$snap_id in $config_target) ==="
+  # Because snapper doesn't have an "info" command, we grep the exact line from 'list'
+  ${PRIV_ESC} snapper -c "$config_target" list 2>/dev/null | awk -F '|' -v id="$snap_id" '{ gsub(/ /, "", $1); if ($1 == id) print $0 }'
+  
+  echo
+  echo "=== CHANGES SINCE THIS SNAPSHOT ==="
+  echo "Generating diff (this may take a few seconds)..."
+  echo "Legend: + (Added) | - (Removed) | c (Modified)"
+  echo "------------------------------------------------"
+  # Limit to 200 lines to prevent lag
+  ${PRIV_ESC} snapper -c "$config_target" status "$snap_id"..0 2>/dev/null | head -n 200
+  echo "... (output truncated)"
 }
 
 # ------------------------------------------------------------------------------
@@ -689,7 +1591,6 @@ function _news_viewer() {
   while true; do
     local news_list
     news_list=$(eselect news list 2>/dev/null)
-    
     local parsed_news
     parsed_news=$(echo "$news_list" | grep -E '^[[:space:]]*\[[0-9]+\]')
     
@@ -711,8 +1612,14 @@ function _news_viewer() {
     
     [[ -z "$selected" ]] && break
     
+    # PERFORMANCE BOOST: Use Bash parameter expansion instead of awk/tr pipeline
     local news_item
-    news_item=$(echo "$selected" | awk '{print $1}' | tr -d '[]*N')
+    read -r news_item _ <<< "$selected"
+    news_item="${news_item//\[/}"
+    news_item="${news_item//\]/}"
+    news_item="${news_item//\*/}"
+    news_item="${news_item//N/}"
+
     if [[ -n "$news_item" ]]; then
       # Read WITH privilege escalation so it gets marked as read!
       ${PRIV_ESC} eselect news read "$news_item" | _fzf_viewer "News Item: $news_item"
@@ -756,7 +1663,7 @@ function _glsa_viewer() {
   fi
 
   # Pre-authenticate sudo so password prompts don't corrupt FZF
-  if [[ -n "$PRIV_ESC" ]]; then
+  if [[ -n "${PRIV_ESC:-}" ]]; then
     $PRIV_ESC true < /dev/tty
   fi
 
@@ -784,8 +1691,9 @@ function _glsa_viewer() {
     
     [[ -z "$selected" ]] && break
     
+    # PERFORMANCE BOOST: Built-in string split instead of awk subshell
     local glsa_id
-    glsa_id=$(echo "$selected" | awk '{print $1}')
+    read -r glsa_id _ <<< "$selected"
     [[ -n "$glsa_id" ]] && ${PRIV_ESC} glsa-check -n -d "$glsa_id" | _fzf_viewer "GLSA: $glsa_id"
   done
 }
@@ -854,8 +1762,8 @@ function _recent_build_logs_viewer() {
     # 1. Find all .log files in the dirs
     # 2. Sort by time (newest first)
     # 3. Take the last 200 to keep it fast
-    # 4. Grep for " * ERROR: " which is the standard Gentoo phase failure marker
-    log_files=$(${PRIV_ESC} find "${search_paths[@]}" -type f -name "*.log" -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 200 | cut -d' ' -f2- | ${PRIV_ESC} xargs -d '\n' -r grep -l -m 1 " \* ERROR: " 2>/dev/null)
+    # 4. Grep for " * ERROR: " OR "!!! " which are the standard Gentoo failure markers (including fetch errors)
+    log_files=$(${PRIV_ESC} find "${search_paths[@]}" -type f -name "*.log" -printf "%T@ %p\n" 2>/dev/null | sort -nr | head -n 200 | cut -d' ' -f2- | ${PRIV_ESC} xargs -d '\n' -r grep -l -E -m 1 "( \* ERROR:|!!! )" 2>/dev/null)
 
     if [[ -z "$log_files" ]]; then
       echo "✅ No failed build logs found in the recent history."
@@ -863,7 +1771,7 @@ function _recent_build_logs_viewer() {
       break
     fi
 
-    local reload_cmd="${PRIV_ESC} find \"${search_paths[@]}\" -type f -name \"*.log\" -printf \"%T@ %p\n\" 2>/dev/null | sort -nr | head -n 200 | cut -d\" \" -f2- | ${PRIV_ESC} xargs -d '\n' -r grep -l -m 1 \" \\* ERROR: \" 2>/dev/null"
+    local reload_cmd="${PRIV_ESC} find \"${search_paths[@]}\" -type f -name \"*.log\" -printf \"%T@ %p\n\" 2>/dev/null | sort -nr | head -n 200 | cut -d\" \" -f2- | ${PRIV_ESC} xargs -d '\n' -r grep -l -E -m 1 \"( \\* ERROR:|!!! )\" 2>/dev/null"
 
     local selected
     selected=$(echo "$log_files" | fzf \
@@ -949,7 +1857,7 @@ function _show_emerge_history() {
 }
 
 # ------------------------------------------------------------------------------
-# PORTAGE CONFIGURATION MANAGERS
+# PORTAGE CONFIGURATION MANAGERS (DASHBOARD)
 # ------------------------------------------------------------------------------
 # Universal Preview Command for all File/Dir FZF pickers
 readonly PREVIEW_CMD="if [[ -d {} ]]; then echo '=== DIRECTORY: {} ==='; echo '══════════════════════════════════════'; ls -lh --color=always {} 2>/dev/null || ls -lh {}; else echo '=== FILE: {} ==='; echo '══════════════════════════════════════'; cat {} 2>/dev/null | head -100; fi"
@@ -957,9 +1865,9 @@ readonly PREVIEW_CMD="if [[ -d {} ]]; then echo '=== DIRECTORY: {} ==='; echo '�
 function _portage_config_manager() {
   while true; do
     local mode
-    mode=$(echo -e "1. 🧙 Guided Configuration Wizards\n2. 📁 Browse Config Directory\n3. 📜 View eLogs / Emerge History\n4. 📰 View Gentoo News (eselect)\n5. 🛡️ Check Security Advisories (GLSA)\n6. 🔄 Run System Config Updater ($PWRFZF_CONFIG_UPDATER)\n7. ⚙️  Edit pwrfzf.conf\n8. Back" | fzf \
+    mode=$(echo -e "─── PORTAGE CONFIGURATION ───\n1. 🧙 Guided Configuration Wizards\n2. 📁 Browse Config Directory\n3. ⚙️  Edit pwrfzf.conf\n─── SYSTEM MANAGEMENT ───\n4. 🔄 Run System Config Updater ($PWRFZF_CONFIG_UPDATER)\n─── LOGS & SECURITY ───\n5. 📜 View eLogs / Emerge History\n6. 📰 View Gentoo News (eselect)\n7. 🛡️ Check Security Advisories (GLSA)\n8. Back" | fzf \
       --header "Portage Management" \
-      --border-label="┨${PROG} - Main Menu┠" \
+      --border-label="┨ Portage Management ┠" \
       --border 'double' \
       --color="${pwrfzf_colortheme}")
 
@@ -969,7 +1877,7 @@ function _portage_config_manager() {
       *History*) _show_emerge_history ;;
       *News*) _news_viewer ;;
       *GLSA*) _glsa_viewer ;;
-      *Updater*) _run_config_updater ;;
+      *Run*System*Config*Updater*) _run_config_updater ;;
       *Edit*pwrfzf.conf*) 
          _launch_editor "$PWRFZF_CONFIG_FILE"
          # Reload configuration instantly after the editor closes
@@ -978,6 +1886,7 @@ function _portage_config_manager() {
          _set_colors
          ;;
       *Back*|"") break ;;
+      *) continue ;; # Handle visual separator selection seamlessly
     esac
   done
 }
@@ -1025,6 +1934,7 @@ function _file_action_menu() {
          if [[ "$ans" == "yes" ]]; then
             ${PRIV_ESC} rm -f "$file"
             _pwrfzf_success "Deleted $file"
+            _clear_preview_cache
             sleep 1
          fi
          break
@@ -1179,6 +2089,7 @@ function _sets_preview() {
       echo "• $file"
     done
     echo
+    
     local first_file
     first_file=$(find "$sets_dir" -type f 2>/dev/null | head -1)
     if [[ -n "$first_file" ]]; then
@@ -1506,7 +2417,7 @@ function _view_sets_conf() {
   if [[ -f "$sets_conf" ]]; then
     echo "=== sets.conf ==="
     _print_divider
-    cat "$sets_conf"
+    cat "$sets_conf" 2>/dev/null
   else
     echo "No sets.conf found at: $sets_conf"
   fi
@@ -1621,6 +2532,7 @@ function _delete_config_file() {
   if [[ "$confirmation" == "yes" ]]; then
     if ${PRIV_ESC} rm -f "$file_path"; then
       echo "✅ File deleted: $file_path"
+      _clear_preview_cache
       local parent_dir
       parent_dir=$(dirname "$file_path")
       if [[ -d "$parent_dir" ]] && [[ "$parent_dir" != "${PORTAGE_ETC}" ]]; then
@@ -1634,42 +2546,6 @@ function _delete_config_file() {
   else
     echo "⚠️ Deletion cancelled"
   fi
-}
-
-function _launch_editor() {
-  local file_path="$1"
-  local editor="$PWRFZF_EDITOR"
-  local editor_cmd="${editor%% *}"
-  
-  # If the configured editor doesn't exist, fallback to robust detection
-  if ! command -v "$editor_cmd" >/dev/null 2>&1; then
-    if command -v nvim >/dev/null 2>&1; then editor="nvim"
-    elif command -v nano >/dev/null 2>&1; then editor="nano"
-    elif command -v vim >/dev/null 2>&1; then editor="vim"
-    elif command -v vi >/dev/null 2>&1; then editor="vi"
-    elif command -v gedit >/dev/null 2>&1; then editor="gedit"
-    elif command -v kate >/dev/null 2>&1; then editor="kate"
-    elif command -v leafpad >/dev/null 2>&1; then editor="leafpad"
-    else
-      _pwrfzf_error "No editor found! Please install nvim, nano, vim, or configure PWRFZF_EDITOR."
-      return 1
-    fi
-  fi
-  
-  if [[ ! -f "$file_path" ]]; then
-    ${PRIV_ESC} mkdir -p "$(dirname "$file_path")"
-    ${PRIV_ESC} touch "$file_path"
-  fi
-  
-  # Launch directly. GUI editors handle this natively without breaking the terminal.
-  if [[ $EUID -eq 0 ]]; then
-    $editor "$file_path" < /dev/tty
-  else
-    ${PRIV_ESC} $editor "$file_path" < /dev/tty
-  fi
-  
-  tput reset 2>/dev/null || true
-  stty sane
 }
 
 function _add_config_entry() {
@@ -1744,6 +2620,7 @@ function _add_config_entry() {
     
     echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
     _pwrfzf_success "Added to $config_file: $new_entry"
+    _clear_preview_cache
   else
     _pwrfzf_warning "Addition cancelled"
   fi
@@ -1878,6 +2755,7 @@ function _add_keyword_entry() {
     
     if echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null; then
       _pwrfzf_success "Added to $config_file: $new_entry"
+      _clear_preview_cache
       return 0
     else
       _pwrfzf_error "Failed to write to $config_file"
@@ -1955,6 +2833,161 @@ function _add_package_set() {
   fi
 }
 
+function _view_current_use_flags() {
+  local package="$1"
+  echo "=== CURRENT USE FLAGS FOR: $package ==="
+  equery uses "$package" 2>/dev/null || echo "Unable to query USE flags"
+  echo
+  echo "=== PACKAGE.USE CONFIGURATION ==="
+  grep -r "$package" "${PORTAGE_ETC}/package.use" 2>/dev/null | head -20 || echo "No custom USE configuration"
+  echo
+  echo "Press any key to continue..."
+  read -n1 -s
+}
+
+function _view_available_use_flags() {
+  local package="$1"
+  echo "=== AVAILABLE USE FLAGS FOR: $package ==="
+  local ebuild_path
+  ebuild_path=$(equery which "$package" 2>/dev/null)
+  if [[ -n "$ebuild_path" ]]; then
+    echo "IUSE flags from ebuild:"
+    grep -E "^IUSE=" "$ebuild_path" 2>/dev/null | head -1 | sed 's/IUSE=//' | tr -d '"' | xargs -n1 | sort | column
+  else
+    echo "Unable to find ebuild"
+  fi
+  echo
+  echo "Press any key to continue..."
+  read -n1 -s
+}
+
+function _remove_use_flags_interactive() {
+  local package="$1"
+  
+  _print_divider
+  echo "Remove USE flags for: $package"
+  
+  local current_config
+  current_config=$(grep -r "$package" "${PORTAGE_ETC}/package.use" 2>/dev/null)
+  
+  if [[ -z "$current_config" ]]; then
+    _pwrfzf_warning "No USE flag configuration found for $package"
+    return 1
+  fi
+  
+  local config_to_remove
+  config_to_remove=$(echo "$current_config" | fzf \
+    --prompt "Select configuration to remove: " \
+    --preview "echo 'Current entry: {}'")
+  
+  [[ -z "$config_to_remove" ]] && return 1
+  
+  local config_file="${config_to_remove%%:*}"
+  local config_line="${config_to_remove#*:}"
+  
+  echo
+  _print_divider
+  echo "CONFIRM REMOVAL:"
+  echo "Entry: $config_line"
+  echo "File: $config_file"
+  echo
+  read -rp "Remove this entry? (y/N) " confirm
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    ${PRIV_ESC} sed -i "\|$config_line|d" "$config_file"
+    _pwrfzf_success "Removed from $config_file: $config_line"
+    _clear_preview_cache
+    return 0
+  else
+    _pwrfzf_warning "Cancelled"
+    return 1
+  fi
+}
+
+function _unmask_packages() {
+  local packages=("$@")
+  local real_packages=()
+  
+  for package in "${packages[@]}"; do
+    if [[ "$package" == */* ]]; then
+      real_packages+=("$package")
+    fi
+  done
+  
+  if [[ ${#real_packages[@]} -eq 0 ]]; then
+    _pwrfzf_warning "No valid package names found in: ${packages[*]}"
+    return 1
+  fi
+  
+  _pwrfzf_verbose "Unmasking packages: ${real_packages[*]}"
+  
+  for package in "${real_packages[@]}"; do
+    _print_divider
+    echo "🛠️ Processing Masked Package: $package"
+    
+    local mask_info
+    mask_info=$(${EMERGE_CMD} --pretend "$package" 2>&1 | grep -A1 "masked by:" | head -2 | tr '\n' ' ')
+    
+    local needs_keyword=false
+    local needs_unmask=false
+    
+    if [[ "$mask_info" =~ "missing keyword" ]]; then needs_keyword=true; fi
+    if [[ "$mask_info" =~ "package.mask" ]]; then needs_unmask=true; fi
+    if [[ "$needs_keyword" == "false" && "$needs_unmask" == "false" ]]; then
+      needs_keyword=true
+      needs_unmask=true
+    fi
+    
+    if [[ "$needs_keyword" == "true" ]]; then
+      echo
+      echo "👉 Action Required: Add to package.accept_keywords"
+      _add_keyword_entry "$package"
+    else
+      echo
+      echo "✅ Keywords are already satisfied (e.g., via make.conf). Skipping accept_keywords."
+    fi
+    
+    if [[ "$needs_unmask" == "true" ]]; then
+      echo
+      echo "👉 Action Required: Add to package.unmask"
+      _add_unmask_entry "$package"
+    fi
+  done
+}
+
+function _add_unmask_entry() {
+  local package="$1"
+  
+  _print_divider
+  echo "Unmasking package (Mask): $package"
+  
+  local edited_package
+  read -e -i "$package" -p "Edit package atom (e.g. append ::repo): " edited_package
+  [[ -z "$edited_package" ]] && return
+  package="$edited_package"
+  
+  local new_entry="$package"
+  
+  echo "Select file to add unmask entry:"
+  local config_file
+  config_file=$(_select_config_file "unmask")
+  [[ -z "$config_file" ]] && return
+  
+  echo
+  _print_divider
+  echo "CONFIRM ADDITION:"
+  echo "Entry: $new_entry"
+  echo "File: $config_file"
+  echo
+  read -rp "Add this entry? (y/N) " answer
+  if [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]; then
+    ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
+    ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
+    echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
+    _pwrfzf_success "Added to $config_file: $new_entry"
+    _clear_preview_cache
+  fi
+}
+
 # ------------------------------------------------------------------------------
 # EMERGE WRAPPERS & ACTIONS
 # ------------------------------------------------------------------------------
@@ -1964,6 +2997,18 @@ function _world_update() {
   echo "🌍 Starting World Update"
   _print_divider
 
+  if [[ $(pgrep -c emerge) -gt 1 ]]; then
+    _pwrfzf_warning "Emerge is already running. Please wait for it to finish."
+    read -n1 -rsp "Press any key to return..." < /dev/tty
+    return 1
+  fi
+
+  if [[ "${PWRFZF_UPDATE_LOWER_PRIORITY:-false}" == "true" ]]; then
+    echo ">>> Lowering priority for smooth background operation (renice & ionice)..."
+    ${PRIV_ESC} renice -n 15 $$ >/dev/null 2>&1 || true
+    ${PRIV_ESC} ionice -c2 -n6 -p $$ >/dev/null 2>&1 || true
+  fi
+
   echo ">>> Syncing repositories..."
   if ${PRIV_ESC} emaint sync -a < /dev/tty; then
     _pwrfzf_success "Repositories synced successfully."
@@ -1971,25 +3016,82 @@ function _world_update() {
     _pwrfzf_warning "Repository sync had issues. Proceeding anyway..."
   fi
 
+  if [[ "${PWRFZF_UPDATE_UPDATE_PORTAGE_FIRST:-false}" == "true" ]]; then
+    echo
+    _print_divider
+    echo ">>> Checking for sys-apps/portage updates first..."
+    ${EMERGE_CMD} -1u sys-apps/portage < /dev/tty
+  fi
+
+  # Extract base parameters globally configured
+  local emerge_args=()
+  if [[ -n "${EMERGE_DEFAULT_OPTS:-}" ]]; then
+    eval "local temp_opts=(${EMERGE_DEFAULT_OPTS:-})"
+    local skip_next=false
+    for arg in "${temp_opts[@]}"; do
+      if [[ "$skip_next" == "true" ]]; then
+        if [[ "$arg" == -* ]]; then skip_next=false; else continue; fi
+      fi
+      if [[ "$arg" == "--buildpkg-exclude" ]]; then skip_next=true; continue; fi
+      if [[ "$arg" == --buildpkg-exclude=* ]]; then continue; fi
+      if [[ "$arg" == *\** && "$arg" != -* ]]; then continue; fi
+      # Do not append -a or --ask as the fallback menu expects interactive control
+      if [[ "$arg" != "-a" && "$arg" != "--ask" ]]; then
+        emerge_args+=("$arg")
+      fi
+    done
+  fi
+  emerge_args+=("-avuDN" "@world")
+
   echo
   _print_divider
   echo ">>> Calculating updates..."
-  ${EMERGE_CMD} -avuDN @world < /dev/tty
+  
+  _install_packages_with_fallback "${emerge_args[@]}"
   local exit_code=$?
 
   echo
   _print_divider
   if [[ $exit_code -eq 0 ]]; then
     _pwrfzf_success "World update completed successfully!"
+    _clear_preview_cache
+    
+    if [[ "${PWRFZF_UPDATE_PRESERVED_REBUILD:-false}" == "true" ]]; then
+      echo ">>> Running preserved-rebuild..."
+      ${EMERGE_CMD} -v --keep-going @preserved-rebuild < /dev/tty
+    fi
+    
+    if [[ "${PWRFZF_UPDATE_DEPCLEAN:-false}" == "true" ]]; then
+      echo ">>> Running depclean..."
+      ${EMERGE_CMD} --quiet-unmerge-warn --quiet --depclean < /dev/tty
+    fi
+
+    if [[ "${PWRFZF_UPDATE_CLEAN_LOGS:-false}" == "true" ]]; then
+      echo ">>> Cleaning old portage logs..."
+      ${PRIV_ESC} emaint -C -t 7 logs < /dev/tty
+    fi
+
+    if [[ "${PWRFZF_UPDATE_ECLEAN_PACKAGES:-false}" == "true" ]] && command -v eclean >/dev/null 2>&1; then
+      echo ">>> Cleaning stale binpkgs..."
+      ${PRIV_ESC} eclean -d packages < /dev/tty
+    fi
+
+    if [[ "${PWRFZF_UPDATE_ECLEAN_DISTFILES:-false}" == "true" ]] && command -v eclean-dist >/dev/null 2>&1; then
+      echo ">>> Cleaning stale distfiles..."
+      ${PRIV_ESC} eclean-dist -f -d < /dev/tty
+    fi
+    
+    if [[ "${PWRFZF_UPDATE_EIX_UPDATE:-false}" == "true" ]] && command -v eix-update >/dev/null 2>&1; then
+      echo ">>> Updating eix cache..."
+      ${PRIV_ESC} eix-update >/dev/null
+    fi
+    
+    ${PRIV_ESC} sync
     read -n1 -rsp "Press any key to return..." < /dev/tty
   else
-    _pwrfzf_error "World update failed or was cancelled (Exit code: $exit_code)."
-    echo
-    read -n1 -rp "Would you like to view failed build logs to investigate? (y/N) " ans < /dev/tty
-    echo
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      _recent_build_logs_viewer
-    fi
+    _pwrfzf_error "World update failed."
+    read -n1 -rp "View failed build logs to investigate? (y/N) " ans < /dev/tty
+    if [[ "$ans" =~ ^[Yy]$ ]]; then _recent_build_logs_viewer; fi
   fi
 }
 
@@ -2009,6 +3111,7 @@ function _install_packages_with_fallback() {
     
     if [[ $emerge_exit_code -eq 0 ]]; then
       echo "✅ Package installation completed successfully"
+      _clear_preview_cache
       return 0
     elif [[ $emerge_exit_code -eq 130 ]]; then
       echo "⏹️ Installation cancelled by user"
@@ -2027,7 +3130,6 @@ function _install_packages_with_fallback() {
       echo "$pretend_output"
       
       if [[ $pretend_exit_code -ne 0 ]]; then
-        # SYNTAX ERROR FILTER
         if echo "$pretend_output" | grep -q "is not a valid package atom"; then
           local invalid_atom
           invalid_atom=$(echo "$pretend_output" | grep "is not a valid package atom" | head -1)
@@ -2102,9 +3204,8 @@ function _install_packages_with_fallback() {
           option_descriptions+=("Fix circular dependencies: ${circular_deps_packages[*]}")
         fi
         
-        options+=("5" "6" "7")
-        option_descriptions+=("Open Portage config manager (all files)" "Let emerge handle automatically (--autounmask-write)")
-        option_descriptions+=("Skip problematic packages and retry")
+        options+=("5" "6" "7" "8")
+        option_descriptions+=("Open Portage config manager (all files)" "Let emerge handle automatically (--autounmask-write)" "Skip problematic packages and retry" "Edit emerge arguments manually")
 
         for i in "${!options[@]}"; do
           echo "${options[i]}) ${option_descriptions[i]}"
@@ -2182,6 +3283,13 @@ function _install_packages_with_fallback() {
             emerge_args=("${filtered_args[@]}")
             
             echo "🔄 Retrying without problematic packages..."
+            continue
+            ;;
+          8)
+            local new_args
+            read -re -i "${emerge_args[*]}" -p "Emerge args: " new_args
+            read -ra emerge_args <<< "$new_args"
+            echo "🔄 Retrying with new arguments..."
             continue
             ;;
           0|*)
@@ -2264,14 +3372,12 @@ function _apply_suggested_use_flags() {
     
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
       ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
-      
-      # Ensure trailing newline safely before appending
       ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
-      
       echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
       
       if ${PRIV_ESC} grep -q "$package_atom" "$config_file" 2>/dev/null; then
         echo "✅ Added to $config_file: $use_entry"
+        _clear_preview_cache
       else
         echo "❌ Failed to verify entry in $config_file"
       fi
@@ -2443,6 +3549,7 @@ function _add_use_flags_interactive() {
     
     if echo "$use_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null; then
       _pwrfzf_success "Added to $config_file: $use_entry"
+      _clear_preview_cache
       return 0
     else
       _pwrfzf_error "Failed to write to $config_file"
@@ -2516,6 +3623,7 @@ function _remove_use_flags_interactive() {
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     ${PRIV_ESC} sed -i "\|$config_line|d" "$config_file"
     _pwrfzf_success "Removed from $config_file: $config_line"
+    _clear_preview_cache
     return 0
   else
     _pwrfzf_warning "Cancelled"
@@ -2544,21 +3652,14 @@ function _unmask_packages() {
     _print_divider
     echo "🛠️ Processing Masked Package: $package"
     
-    # Analyze exact masking reasons
     local mask_info
     mask_info=$(${EMERGE_CMD} --pretend "$package" 2>&1 | grep -A1 "masked by:" | head -2 | tr '\n' ' ')
     
     local needs_keyword=false
     local needs_unmask=false
     
-    if [[ "$mask_info" =~ "missing keyword" ]]; then
-      needs_keyword=true
-    fi
-    if [[ "$mask_info" =~ "package.mask" ]]; then
-      needs_unmask=true
-    fi
-    
-    # Fallback if detection fails
+    if [[ "$mask_info" =~ "missing keyword" ]]; then needs_keyword=true; fi
+    if [[ "$mask_info" =~ "package.mask" ]]; then needs_unmask=true; fi
     if [[ "$needs_keyword" == "false" && "$needs_unmask" == "false" ]]; then
       needs_keyword=true
       needs_unmask=true
@@ -2608,69 +3709,43 @@ function _add_unmask_entry() {
   read -rp "Add this entry? (y/N) " answer
   if [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]; then
     ${PRIV_ESC} mkdir -p "$(dirname "$config_file")"
-    
-    # Ensure trailing newline safely before appending
     ${PRIV_ESC} bash -c "[[ -s \"$config_file\" && \$(tail -c1 \"$config_file\" | wc -l) -eq 0 ]] && echo \"\" >> \"$config_file\""
-    
     echo "$new_entry" | ${PRIV_ESC} tee -a "$config_file" >/dev/null
     _pwrfzf_success "Added to $config_file: $new_entry"
+    _clear_preview_cache
   fi
 }
 
 # ------------------------------------------------------------------------------
-# MAIN LOOP
+# MAIN EXECUTION WRAPPER
 # ------------------------------------------------------------------------------
-function main() {
-  local ARGS=() SearchInput
-  local BASE_EMERGE_ARGS=()
+function _pwrfzf_main() {
+  local ARGS=() SearchInput=""
+  local BASE_EMERGE_ARGS=("--ask")
   
-  # Remove toggle flag to start fresh
   rm -f "${PWRFZF_CACHE_DIR}/.show_installed"
   
-  # Try to safely extract EMERGE_DEFAULT_OPTS with portageq
   if command -v portageq >/dev/null 2>&1; then
     local env_opts
     env_opts=$(portageq envvar EMERGE_DEFAULT_OPTS 2>/dev/null)
     [[ -n "$env_opts" ]] && EMERGE_DEFAULT_OPTS="$env_opts"
   fi
 
-  # Use set -f to prevent bash from expanding globs like virtual/* 
   set -f
-  if [[ -n "$EMERGE_DEFAULT_OPTS" ]]; then
-    _pwrfzf_verbose "Using EMERGE_DEFAULT_OPTS: $EMERGE_DEFAULT_OPTS"
-    eval "local temp_opts=($EMERGE_DEFAULT_OPTS)"
-    
+  if [[ -n "${EMERGE_DEFAULT_OPTS:-}" ]]; then
+    eval "local temp_opts=(${EMERGE_DEFAULT_OPTS:-})"
     local skip_next=false
     for arg in "${temp_opts[@]}"; do
-      # Skip arguments that belong to a previously filtered flag (e.g. virtual/*)
       if [[ "$skip_next" == "true" ]]; then
-        if [[ "$arg" == -* ]]; then
-          skip_next=false
-        else
-          continue
-        fi
+        if [[ "$arg" == -* ]]; then skip_next=false; else continue; fi
       fi
-      
-      # Completely filter out --buildpkg-exclude and its parameters
-      if [[ "$arg" == "--buildpkg-exclude" ]]; then
-        skip_next=true
-        continue
-      fi
-      if [[ "$arg" == --buildpkg-exclude=* ]]; then
-        continue
-      fi
-      
-      # Safety net: Filter out orphaned wildcards (*) that are not flags
-      if [[ "$arg" == *\** && "$arg" != -* ]]; then
-        continue
-      fi
-      
+      if [[ "$arg" == "--buildpkg-exclude" ]]; then skip_next=true; continue; fi
+      if [[ "$arg" == --buildpkg-exclude=* ]]; then continue; fi
+      if [[ "$arg" == *\** && "$arg" != -* ]]; then continue; fi
       BASE_EMERGE_ARGS+=("$arg")
     done
   fi
   set +f
-
-  BASE_EMERGE_ARGS+=("--ask")
 
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -2679,9 +3754,9 @@ function main() {
       -k|--keybindings) _pwrfzf_keys; exit 0 ;;
       -V|--version) _pwrfzf_version; exit 0 ;;
       -c|--config) _portage_config_manager; exit 0 ;;
-      --sync) _sync_repositories; exit 0 ;;
-      --preserved-rebuild) _preserved_rebuild; exit 0 ;;
+      --sync) ${PRIV_ESC} emaint sync -a; exit 0 ;;
       --depclean) ${EMERGE_CMD} -a --depclean; exit 0 ;;
+      --preserved-rebuild) ${EMERGE_CMD} -1 @preserved-rebuild; exit 0 ;;
       -*) BASE_EMERGE_ARGS+=("$1") ;;
       *) ARGS+=("$1") ;;
     esac
@@ -2691,13 +3766,12 @@ function main() {
   SearchInput="${ARGS[*]}"
   
   local fzf_search_opts=()
-  [[ "$PWRFZF_SEARCH_NAMES_ONLY" == "true" ]] && fzf_search_opts+=("--nth=1")
+  [[ "${PWRFZF_SEARCH_NAMES_ONLY:-false}" == "true" ]] && fzf_search_opts+=("--nth=1")
   
   local last_selected_packages=()
   local auto_retry=false
   
   while true; do
-    # CLEAR ARRAYS ON EACH LOOP
     local PICKS=()
     local PKGS=()
     local emerge_args=("${BASE_EMERGE_ARGS[@]}")
@@ -2707,59 +3781,71 @@ function main() {
       PKGS=("${last_selected_packages[@]}")
       auto_retry=false
     else
-      __emerge_list "$SearchInput" | fzf "${fzf_search_opts[@]}" \
-        --bind "ctrl-r:execute(pkgs=\$(echo {+1} | tr -d ':'); [[ -n \"\$pkgs\" ]] && ${EMERGE_CMD} -aC \$pkgs < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
-        --bind "ctrl-x:execute(${EMERGE_CMD} -a --depclean < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
-        --bind "ctrl-w:execute(${BASH_SOURCE[0]} _world_update)" \
-        --bind "ctrl-z:execute(${EMERGE_CMD} -1 @preserved-rebuild < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
-        --bind "ctrl-s:execute(${PRIV_ESC} emaint sync -a < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)" \
-        --bind "ctrl-o:execute:${BASH_SOURCE[0]} -c" \
-        --bind "alt-u:execute(${BASH_SOURCE[0]} _run_config_updater)" \
-        --bind "ctrl-y:execute(${BASH_SOURCE[0]} _show_emerge_history)" \
-        --bind "ctrl-p:reload(\"${BASH_SOURCE[0]}\" _toggle_installed \"${PWRFZF_FZF_LAYOUT}\")" \
-        --bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)' \
-        --bind 'ctrl-l:clear-query+clear-screen+clear-selection' \
-        --bind 'alt-bspace:clear-query' \
-        --bind 'alt-left:kill-word' \
-        --bind "esc:abort" \
-        --bind 'ctrl-q:abort' \
-        --bind 'ctrl-d:deselect-all' \
-        --bind 'ctrl-i:toggle' \
-        --bind 'ctrl-v:toggle-preview' \
-        --bind 'ctrl-n:next-history' \
-        --bind 'ctrl-b:previous-history' \
-        --bind 'right:first' \
-        --bind 'left:last' \
-        --bind 'end:first' \
-        --bind 'home:last' \
-        --bind 'pgdn:page-down' \
-        --bind 'pgup:page-up' \
-        --bind "?:preview(echo '$(_pwrfzf_keys)')" \
-        --bind "ctrl-h:preview(echo '$(_pwrfzf_keys)')" \
-        --bind "change:first" \
-        --header 'Press ? for keys | Ctrl+o: Config | Ctrl+y: eLogs | Alt-u: Update Config | Ctrl+p: Installed' \
-        --header-lines=1 \
-        --preview-window "$PWRFZF_PREVIEW_WINDOW" \
-        --history="$PWRFZF_HISTORY" \
-        --query="${SearchInput}" \
-        --preview-label-pos=top \
-        --border-label-pos=3 \
-        --border 'double' \
-        --preview-label="╣${SearchInput:-pwrfzf}╠" \
-        --border-label="┨${PROG}┠" \
-        --info=inline \
-        --scroll-off=20 \
-        --hscroll-off=30 \
-        --ellipsis="⣿" \
-        --tiebreak=begin \
-        --sync \
-        --multi \
-        --delimiter ' ' \
-        --ansi \
-        --color="${pwrfzf_colortheme}" \
-        --preview="bash -c '\"${BASH_SOURCE[0]}\" __fzf_preview {1}'" | while read -r line; do
-          PICKS+=("$line")
-        done
+      local fzf_header_text="Press ? for keys | Ctrl+o: Config & Mgmt | Ctrl+w: World Update"
+      if [[ "${PWRFZF_ENABLE_KERNEL_HUB:-false}" == "true" ]]; then
+        fzf_header_text+=" | Ctrl+k: System Hub"
+      fi
+
+      # Robust FZF options using a Bash array to prevent word-splitting bugs
+      local fzf_args=(
+        --bind "ctrl-r:execute(pkgs=\$(echo {+1} | tr -d ':'); [[ -n \"\$pkgs\" ]] && ${EMERGE_CMD} -aC \$pkgs < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)"
+        --bind "ctrl-x:execute(${EMERGE_CMD} -a --depclean < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)"
+        --bind "ctrl-w:execute(${BASH_SOURCE[0]} _world_update)"
+        --bind "ctrl-z:execute(${EMERGE_CMD} -1 @preserved-rebuild < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)"
+        --bind "ctrl-s:execute(${PRIV_ESC} emaint sync -a < /dev/tty; echo; read -n1 -rsp 'Press any key to return...' < /dev/tty)"
+        --bind "ctrl-o:execute(${BASH_SOURCE[0]} -c)"
+        --bind "alt-u:execute(${BASH_SOURCE[0]} _run_config_updater)"
+        --bind "ctrl-y:execute(${BASH_SOURCE[0]} _show_emerge_history)"
+        --bind "ctrl-p:reload(\"${BASH_SOURCE[0]}\" _toggle_installed \"${PWRFZF_FZF_LAYOUT}\")"
+        --bind 'ctrl-/:change-preview-window(up,border-rounded|up,40%,border-rounded|left,border-rounded|left,border-rounded,40%|down,border-rounded|down,40%,border-rounded|down,10%,border-rounded|hidden|right,40%,border-rounded|right,70%,border-rounded|right,90%,border-rounded)'
+        --bind 'ctrl-l:clear-query+clear-screen+clear-selection'
+        --bind 'alt-bspace:clear-query'
+        --bind 'alt-left:kill-word'
+        --bind "esc:abort"
+        --bind 'ctrl-q:abort'
+        --bind 'ctrl-d:deselect-all'
+        --bind 'ctrl-i:toggle'
+        --bind 'ctrl-v:toggle-preview'
+        --bind 'alt-n:next-history'
+        --bind 'alt-p:previous-history'
+        --bind 'right:first'
+        --bind 'left:last'
+        --bind 'end:first'
+        --bind 'home:last'
+        --bind 'pgdn:page-down'
+        --bind 'pgup:page-up'
+        --bind "?:preview(echo '$(_pwrfzf_keys)')"
+        --bind "ctrl-h:preview(echo '$(_pwrfzf_keys)')"
+        --bind "change:first"
+        --header "$fzf_header_text"
+        --header-lines=1
+        --preview-window "$PWRFZF_PREVIEW_WINDOW"
+        --history="$PWRFZF_HISTORY"
+        --query="${SearchInput}"
+        --preview-label-pos=top
+        --border-label-pos=3
+        --border 'double'
+        --preview-label="╣${SearchInput:-pwrfzf}╠"
+        --border-label="┨${PROG}┠"
+        --info=inline
+        --scroll-off=20
+        --hscroll-off=30
+        --ellipsis="⣿"
+        --tiebreak=begin
+        --sync
+        --multi
+        --delimiter ' '
+        --ansi
+        --color="${pwrfzf_colortheme}"
+        --preview="bash -c '\"${BASH_SOURCE[0]}\" __fzf_preview {1}'"
+      )
+
+      if [[ "${PWRFZF_ENABLE_KERNEL_HUB:-false}" == "true" ]]; then
+        fzf_args+=(--bind "ctrl-k:execute(${BASH_SOURCE[0]} _kernel_hub)")
+      fi
+
+      # PERFORMANCE BOOST: mapfile avoids slow Bash interpretation of fzf output lines
+      mapfile -t PICKS < <(__emerge_list "$SearchInput" | fzf "${fzf_search_opts[@]}" "${fzf_args[@]}")
       
       # Exit logic: Check if we cancelled FZF
       if [[ ${#PICKS[@]} -eq 0 ]]; then
@@ -2768,11 +3854,13 @@ function main() {
           _print_divider
           read -rp "Exit PWRFZF? (Y/n): " exit_ans
           if [[ -z "$exit_ans" || "$exit_ans" =~ ^[Yy]$ ]]; then
+            _clear_preview_cache
             exit 0
           else
             continue
           fi
         else
+          _clear_preview_cache
           exit 0
         fi
       fi
@@ -2780,8 +3868,8 @@ function main() {
       # Safe Regex Package Extraction 
       # Guarantees only the pure package name passes to emerge, sans spaces or colons.
       for PICK in "${PICKS[@]}"; do
-        local atom="${PICK%% *}" # Grab first word before space
-        atom="${atom%:}"         # Strip trailing colon
+        local atom="${PICK%% *}"
+        atom="${atom%:}"
         if [[ -n "$atom" ]]; then
           PKGS+=("$atom")
         fi
@@ -2792,7 +3880,6 @@ function main() {
     
     if [[ ${PWRFZF_CONFIRM_ACTIONS} == "true" ]]; then
       local confirm_loop=true
-      
       while [[ "$confirm_loop" == "true" ]]; do
         if [[ ${#PKGS[@]} -eq 0 ]]; then
           echo "⚠️ No packages left to install."
@@ -2817,17 +3904,9 @@ function main() {
         read -rp "Your choice (y/N/o/d/e/r/s): " answer
         
         case "${answer,,}" in
-          y|yes) 
-            confirm_loop=false
-            ;;
-          o|oneshot)
-            emerge_args+=("--oneshot")
-            echo "✅ Added --oneshot flag."
-            ;;
-          d|depclean)
-            emerge_args+=("--depclean")
-            echo "✅ Added --depclean flag."
-            ;;
+          y|yes) confirm_loop=false ;;
+          o|oneshot) emerge_args+=("--oneshot"); echo "✅ Added --oneshot flag." ;;
+          d|depclean) emerge_args+=("--depclean"); echo "✅ Added --depclean flag." ;;
           s|save)
             echo
             read -rp "Enter set name (e.g., custom_install_list): " set_name
@@ -2847,13 +3926,10 @@ function main() {
           r|remove)
             local pkgs_to_remove
             pkgs_to_remove=$(printf "%s\n" "${PKGS[@]}" | fzf --multi --header="Select packages to REMOVE (Tab to multi-select, Enter to confirm)" --prompt="Remove> ")
-            
             if [[ -n "$pkgs_to_remove" ]]; then
               local new_pkgs=()
               for p in "${PKGS[@]}"; do
-                if ! echo "$pkgs_to_remove" | grep -qxF "$p"; then
-                  new_pkgs+=("$p")
-                fi
+                if ! echo "$pkgs_to_remove" | grep -qxF "$p"; then new_pkgs+=("$p"); fi
               done
               PKGS=("${new_pkgs[@]}")
               last_selected_packages=("${PKGS[@]}")
@@ -2868,7 +3944,6 @@ function main() {
             ;;
         esac
       done
-      
       [[ ${#PKGS[@]} -eq 0 ]] && continue
     fi
     
@@ -2884,7 +3959,6 @@ function main() {
       auto_retry=false
       continue
     fi
-
     auto_retry=false
   done
 }
@@ -2897,7 +3971,7 @@ case "${1:-}" in
     __fzf_preview "$2"
     exit 0
     ;;
-  _config_preview|_action_preview|_sets_action_preview|_toggle_installed|_get_glsa_list|_toggle_glsa)
+  _config_preview|_action_preview|_sets_action_preview|_toggle_installed|_get_glsa_list|_toggle_glsa|_snapper_preview)
     # ⚠️ Data streams for FZF - absolutely no terminal output allowed here!
     # Any 'echo' or 'printf' to stdout will corrupt the FZF interface.
     # Therefore, _pwrfzf_verbose logs silently to file here.
@@ -2910,7 +3984,7 @@ case "${1:-}" in
     "$1" "${@:2}"
     exit 0
     ;;
-  _show_emerge_history|_run_config_updater|_world_update)
+  _show_emerge_history|_run_config_updater|_world_update|_btrfs_snapshot_menu|_kernel_hub)
     # Interactive FZF execute wrappers
     _load_config
     _validate_config
@@ -2922,6 +3996,6 @@ case "${1:-}" in
     ;;
   *)
     _pwrfzf_init
-    main "$@"
+    _pwrfzf_main "$@"
     ;;
 esac

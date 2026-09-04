@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.8.4] - 2026-09-04
+
+### Added
+- **Developer Feature Toggle:** Added `PWRFZF_ENABLE_KERNEL_HUB=false` to `pwrfzf.conf`. The System & Kernel Hub (`Ctrl-k`) is now an opt-in developer feature and hidden by default.
+
+### Changed
+- **Menu Categorization:** Redesigned the Portage Config Manager (`Ctrl-o`) and the System Hub (`Ctrl-k`) with clean visual headers (e.g., `─── PORTAGE CONFIGURATION ───`) for better readability.
+- **System Hub Consolidation:** Integrated the Btrfs Snapshot Rollback and EFI Boot Manager directly into the System Hub (`Ctrl-k`) for centralized system management.
+- **Robust Keybindings:** Completely refactored how dynamic keybindings are passed to `fzf` in the main loop (using native Bash arrays) to prevent word-splitting bugs and `unknown action` syntax errors.
+- **Secure Boot Defaults:** Updated default Secure Boot key paths to the current schema (`/etc/efikeys/sb-keys-2026/`).
+- **Kernel Hub Stability:** The Kernel Hub now gracefully handles missing `/usr/src/linux` directories without exiting, keeping EFI and Btrfs tools fully accessible.
+
 ## [2.8.3] - 2026-08-24
 ### Changed
 - **Global Preview Scrolling:** Standardized keyboard navigation for the right-hand preview window across all menus (Packages, Config Wizards, eLogs, GLSA, etc.).
